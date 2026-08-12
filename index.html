@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>メモ</title>
-<!-- メモ（Keep風）single-file app / version: v1.13 (2026-08-12) -->
-<meta name="app-version" content="v1.13 (2026-08-12)">
+<!-- メモ（Keep風）single-file app / version: v1.14 (2026-08-12) -->
+<meta name="app-version" content="v1.14 (2026-08-12)">
 <style>
   :root{
     --bg:#fafafa; --ink:#222; --sub:#666; --line:#dcdcdc; --line2:#c8c8c8;
@@ -101,6 +101,10 @@
   .mini:disabled{ opacity:.32; cursor:default; }
   .tagrow .nm{ flex:1; }
   .modal .close{ margin-top:14px; text-align:right; }
+  .mapmodal{ background:#fff; border-radius:10px; width:min(920px,96vw); height:min(80vh,760px); display:flex; flex-direction:column; overflow:hidden; }
+  .mapbar{ display:flex; align-items:center; gap:10px; padding:8px 12px; border-bottom:1px solid var(--line); }
+  .mapstat{ font-size:12.5px; color:#444; }
+  .mapcanvas{ flex:1; min-height:0; }
 
   .empty{ text-align:center; color:#aaa; font-size:13px; margin-top:40px; }
   #overlay{ position:fixed; inset:0; background:rgba(250,250,250,.97); z-index:100; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; }
@@ -166,7 +170,7 @@
 /* ============================================================
    メモ（Keep風）— 単一HTML / Googleドライブ保存(drive.file)
    ============================================================ */
-const APP_VERSION = "v1.13 (2026-08-12)";
+const APP_VERSION = "v1.14 (2026-08-12)";
 const CONFIG = {
   CLIENT_ID: "162155904085-ud13pisfjodgim2t19q9n2us70ekc9n4.apps.googleusercontent.com",
   SCOPE: "https://www.googleapis.com/auth/drive.file",
@@ -367,6 +371,7 @@ function normalize(n){
   return { id:n.id||uid("n_"), text:n.text||"", tags:Array.isArray(n.tags)?n.tags:[],
     color:n.color||"none", archived:!!n.archived, order:typeof n.order==="number"?n.order:0,
     attachments:Array.isArray(n.attachments)?n.attachments:[],
+    geo:(n.geo && typeof n.geo.lat==="number") ? {addr:n.geo.addr, lat:n.geo.lat, lng:n.geo.lng} : null,
     createdAt:n.createdAt||nowISO(), updatedAt:n.updatedAt||n.createdAt||nowISO() };
 }
 
@@ -857,17 +862,60 @@ function setupComposeAttach(){
 function refreshTagOptions(){ const dl=$("#tagOptions"); if(!dl)return; dl.innerHTML=""; allTags().forEach(([t])=>{ const o=el("option"); o.value=t; dl.appendChild(o); }); }
 function renderAll(){ renderSide(); renderGrid(); refreshTagOptions(); }
 
-/* ---------- 表示中メモの住所をGoogleマップにまとめて開く ---------- */
-function openMapForVisible(){
-  const addrs=[];
-  visibleNotes().forEach(n=>{ const a=extractAddress(n.text); if(a && !addrs.includes(a)) addrs.push(a); });
-  if(!addrs.length){ toast("表示中のメモに『住所：…』が見つかりません"); return; }
-  let use=addrs;
-  if(addrs.length>10){ use=addrs.slice(0,10); toast(`地点が多いため先頭10件を表示（${addrs.length}件中）`); }
-  const url = use.length===1
-    ? "https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(use[0])
-    : "https://www.google.com/maps/dir/"+use.map(a=>encodeURIComponent(a)).join("/");
-  window.open(url, "_blank");
+/* ---------- 表示中メモの住所を、アプリ内地図にピン表示（OSM/Leaflet + Nominatim） ---------- */
+const sleep = ms => new Promise(r=>setTimeout(r, ms));
+const geoCache = new Map();
+function loadLeaflet(){
+  return new Promise((res,rej)=>{
+    if(window.L) return res();
+    const css=document.createElement("link"); css.rel="stylesheet"; css.href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"; document.head.appendChild(css);
+    const s=document.createElement("script"); s.src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"; s.onload=()=>res(); s.onerror=()=>rej(new Error("leaflet")); document.head.appendChild(s);
+  });
+}
+async function geocodeAddr(addr){
+  if(geoCache.has(addr)) return geoCache.get(addr);
+  const url="https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=jp&q="+encodeURIComponent(addr);
+  const r=await fetch(url,{headers:{Accept:"application/json"}});
+  const j=await r.json();
+  const g=(j&&j[0])?{lat:parseFloat(j[0].lat), lng:parseFloat(j[0].lon)}:null;
+  if(g) geoCache.set(addr,g);
+  return g;
+}
+async function openMapPins(){
+  const notes=visibleNotes().filter(n=>extractAddress(n.text));
+  if(!notes.length){ toast("表示中のメモに『住所：…』が見つかりません"); return; }
+  const bg=el("div","modal-bg"); const box=el("div","mapmodal");
+  const bar=el("div","mapbar"); const st=el("span","mapstat"); st.textContent="地図を準備中…";
+  const cbtn=el("button","mini"); cbtn.textContent="閉じる"; cbtn.onclick=()=>bg.remove();
+  const sp=el("span"); sp.style.flex="1";
+  bar.appendChild(st); bar.appendChild(sp); bar.appendChild(cbtn);
+  const mapEl=el("div","mapcanvas");
+  box.appendChild(bar); box.appendChild(mapEl); bg.appendChild(box);
+  bg.onclick=e=>{ if(e.target===bg) bg.remove(); }; document.body.appendChild(bg);
+  try{ await loadLeaflet(); }catch(e){ st.textContent="地図の読み込みに失敗（ネット接続を確認してください）"; return; }
+  const map=L.map(mapEl).setView([35.68,139.76],11);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19, attribution:"© OpenStreetMap contributors"}).addTo(map);
+  setTimeout(()=>map.invalidateSize(),120);
+  const pts=[]; let done=0, fail=0;
+  for(const n of notes){
+    const addr=extractAddress(n.text);
+    let g=(n.geo && n.geo.addr===addr && typeof n.geo.lat==="number") ? {lat:n.geo.lat,lng:n.geo.lng} : null;
+    if(!g){
+      st.textContent=`座標を取得中… ${done+1}/${notes.length}`;
+      try{ g=await geocodeAddr(addr); }catch(e){}
+      if(g){ n.geo={addr, lat:g.lat, lng:g.lng}; markDirty(); }
+      await sleep(1100); // Nominatim利用ポリシー（約1件/秒）
+    }
+    if(g){
+      const title=(n.text.split("\n")[0]||"").trim();
+      const mk=L.marker([g.lat,g.lng]).addTo(map);
+      mk.bindPopup("<b>"+esc(title)+"</b><br><a href='https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(addr)+"' target='_blank' rel='noopener'>Googleマップで開く</a>");
+      pts.push([g.lat,g.lng]);
+    } else { fail++; }
+    done++;
+  }
+  if(pts.length){ map.fitBounds(pts,{padding:[30,30], maxZoom:16}); }
+  st.textContent = pts.length ? (`${pts.length}件をプロット`+(fail?`（${fail}件は住所を特定できず）`:"")) : "住所を地図上で特定できませんでした";
 }
 
 /* ---------- メモ帳（複数） ---------- */
@@ -906,7 +954,7 @@ function bindEvents(){
     $("#sortBtn").textContent = "並び："+(state.sort==="updated"?"更新日順":"手動並び順"); renderGrid(); };
   $("#menuBtn").onclick=openMenu;
   $("#bookSel").onchange=()=>{ const v=$("#bookSel").value; if(v==="__new__"){ createBook(); } else if(v!==state.book){ switchBook(v); } };
-  $("#mapBtn").onclick=openMapForVisible;
+  $("#mapBtn").onclick=openMapPins;
   const cText=$("#cText");
   cText.addEventListener("input",()=>autoGrow(cText));
   cText.addEventListener("keydown",e=>{ if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){ addNoteFromCompose(); } });

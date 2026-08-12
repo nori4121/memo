@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>メモ</title>
+<!-- メモ（Keep風）single-file app / version: v1.1 (2026-08-12) -->
+<meta name="app-version" content="v1.1 (2026-08-12)">
 <style>
   :root{
     --bg:#fafafa; --ink:#222; --sub:#666; --line:#dcdcdc; --line2:#c8c8c8;
@@ -17,7 +19,8 @@
   /* ---- header ---- */
   header{ position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:10px;
     padding:8px 14px; background:#fff; border-bottom:1px solid var(--line); }
-  header .title{ font-weight:700; font-size:16px; margin-right:4px; }
+  header .title{ font-weight:700; font-size:16px; margin-right:2px; }
+  header .ver{ font-size:10.5px; color:#aaa; margin-right:6px; align-self:flex-end; padding-bottom:2px; }
   #search{ flex:1; max-width:420px; padding:7px 12px; border:1px solid var(--line2); border-radius:20px; font-size:13.5px; }
   .hbtn{ border:1px solid var(--line2); background:#fff; border-radius:6px; padding:6px 10px; font-size:12.5px; cursor:pointer; color:#333; }
   .hbtn:hover{ background:#f2f2f2; }
@@ -103,6 +106,7 @@
 
 <header>
   <span class="title">メモ</span>
+  <span class="ver" id="ver"></span>
   <input id="search" placeholder="検索（キーワード・アーカイブも対象）">
   <button class="hbtn" id="sortBtn" title="並び順">並び：更新日順</button>
   <div class="spacer"></div>
@@ -143,6 +147,7 @@
 /* ============================================================
    メモ（Keep風）— 単一HTML / Googleドライブ保存(drive.file)
    ============================================================ */
+const APP_VERSION = "v1.1 (2026-08-12)";
 const CONFIG = {
   CLIENT_ID: "162155904085-ud13pisfjodgim2t19q9n2us70ekc9n4.apps.googleusercontent.com",
   SCOPE: "https://www.googleapis.com/auth/drive.file",
@@ -635,6 +640,7 @@ function bindEvents(){
 }
 
 /* ---------- boot ---------- */
+$("#ver").textContent = APP_VERSION;
 bindEvents();
 initAuth();
 </script>

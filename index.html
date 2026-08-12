@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>メモ</title>
-<!-- メモ（Keep風）single-file app / version: v1.3 (2026-08-12) -->
-<meta name="app-version" content="v1.3 (2026-08-12)">
+<!-- メモ（Keep風）single-file app / version: v1.4 (2026-08-12) -->
+<meta name="app-version" content="v1.4 (2026-08-12)">
 <style>
   :root{
     --bg:#fafafa; --ink:#222; --sub:#666; --line:#dcdcdc; --line2:#c8c8c8;
@@ -156,7 +156,7 @@
 /* ============================================================
    メモ（Keep風）— 単一HTML / Googleドライブ保存(drive.file)
    ============================================================ */
-const APP_VERSION = "v1.3 (2026-08-12)";
+const APP_VERSION = "v1.4 (2026-08-12)";
 const CONFIG = {
   CLIENT_ID: "162155904085-ud13pisfjodgim2t19q9n2us70ekc9n4.apps.googleusercontent.com",
   SCOPE: "https://www.googleapis.com/auth/drive.file",
@@ -302,6 +302,10 @@ window.addEventListener("beforeunload", e=>{ if(dirty){ e.preventDefault(); e.re
 /* ============================================================
    認証
    ============================================================ */
+const TOK_KEY="__memo_tok__";
+function storeToken(t,expiresIn){ try{ localStorage.setItem(TOK_KEY, JSON.stringify({t, e:Date.now()+((expiresIn||3600)*1000)-60000})); }catch(e){} }
+function cachedToken(){ try{ const o=JSON.parse(localStorage.getItem(TOK_KEY)); if(o&&o.t&&o.e>Date.now()) return o.t; }catch(e){} return null; }
+function clearToken(){ try{ localStorage.removeItem(TOK_KEY); }catch(e){} }
 function reauth(){ if(tokenClient) tokenClient.requestAccessToken({prompt:""}); }
 function initAuth(){
   if(MOCK){ afterAuth(); return; }
@@ -309,10 +313,14 @@ function initAuth(){
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CONFIG.CLIENT_ID, scope: CONFIG.SCOPE,
     callback: (resp)=>{ if(resp.error){ $("#ovmsg").textContent="認証エラー: "+resp.error; return; }
-      accessToken = resp.access_token; afterAuth(); },
+      accessToken = resp.access_token; storeToken(resp.access_token, resp.expires_in); afterAuth(); },
   });
-  $("#connect").onclick = ()=> tokenClient.requestAccessToken({prompt:"consent"});
+  // 毎回の同意強制をやめる（初回は自動で同意、以降は無音）
+  $("#connect").onclick = ()=> tokenClient.requestAccessToken({prompt:""});
   $("#ovmsg").textContent="";
+  // 記憶したトークンが生きていれば、クリックも許可画面もなしで開く
+  const ct=cachedToken();
+  if(ct){ accessToken=ct; afterAuth(); }
 }
 async function afterAuth(){
   try{
@@ -323,7 +331,7 @@ async function afterAuth(){
     renderAll();
     setTimeout(()=>$("#cText").focus(), 60);
   }catch(e){
-    if(String(e.message).includes("UNAUTH")){ reauth(); }
+    if(String(e.message).includes("UNAUTH")){ clearToken(); accessToken=null; $("#overlay").style.display="flex"; $("#ovmsg").textContent="再接続が必要です。「Googleに接続」を押してください。"; }
     else { $("#overlay").style.display="flex"; $("#ovmsg").textContent="読込エラー: "+e.message; }
   }
 }

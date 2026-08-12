@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>メモ</title>
-<!-- メモ（Keep風）single-file app / version: v1.7 (2026-08-12) -->
-<meta name="app-version" content="v1.7 (2026-08-12)">
+<!-- メモ（Keep風）single-file app / version: v1.9 (2026-08-12) -->
+<meta name="app-version" content="v1.9 (2026-08-12)">
 <style>
   :root{
     --bg:#fafafa; --ink:#222; --sub:#666; --line:#dcdcdc; --line2:#c8c8c8;
@@ -58,6 +58,8 @@
   #grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px; align-items:start; max-width:1200px; }
   .card{ border:1px solid var(--line2); border-radius:10px; padding:10px 12px 8px; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.05); display:flex; flex-direction:column; gap:6px; position:relative; }
   .card.drag{ opacity:.4; }
+  .card.archived{ border-style:dashed; border-color:#9a9a9a; border-width:1.5px; background-image:repeating-linear-gradient(45deg, rgba(0,0,0,0.035) 0 8px, transparent 8px 16px); }
+  .arcbadge{ align-self:flex-start; background:#6b6b6b; color:#fff; font-size:10px; font-weight:600; border-radius:4px; padding:1px 8px; letter-spacing:.5px; }
   .card.over{ outline:2px dashed var(--accent); }
   .card textarea{ width:100%; border:0; resize:none; font:inherit; font-size:13.5px; line-height:1.6; outline:none; background:transparent; overflow:hidden; }
   .card .firstline{ font-weight:700; }
@@ -131,7 +133,7 @@
       <textarea id="cText" rows="1" placeholder="メモを入力…（1行目が見出し／画像はCtrl+V・ファイルはドラッグ＆ドロップ）"></textarea>
       <div class="atts" id="cPending" style="margin:6px 0"></div>
       <div class="row">
-        <input class="taginput" id="cTag" placeholder="#タグ 追加（Enter）">
+        <input class="taginput" id="cTag" list="tagOptions" placeholder="#タグ 追加（Enter）">
         <button class="mini" id="cAttach">📎 添付</button>
         <div class="dots" id="cDots"></div>
         <button class="addbtn" id="cAdd">追加</button>
@@ -150,6 +152,7 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<datalist id="tagOptions"></datalist>
 
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
@@ -157,7 +160,7 @@
 /* ============================================================
    メモ（Keep風）— 単一HTML / Googleドライブ保存(drive.file)
    ============================================================ */
-const APP_VERSION = "v1.7 (2026-08-12)";
+const APP_VERSION = "v1.9 (2026-08-12)";
 const CONFIG = {
   CLIENT_ID: "162155904085-ud13pisfjodgim2t19q9n2us70ekc9n4.apps.googleusercontent.com",
   SCOPE: "https://www.googleapis.com/auth/drive.file",
@@ -181,6 +184,7 @@ const MOCK = new URLSearchParams(location.search).has("mock");
 /* ---------- state ---------- */
 let state = {
   notes: [],
+  tagDefs: [],         // マスタータグ一覧（メモ未使用でも保持）
   view: "ALL",         // ALL | ARCHIVE
   tags: new Set(),     // 選択中のタグ（複数選択でAND絞り込み）
   q: "",
@@ -292,7 +296,7 @@ let store = MOCK ? MockStore : DriveStore;
 /* ============================================================
    保存（デバウンス2秒） / データ整形
    ============================================================ */
-function snapshot(){ return {version:1, updatedAt:nowISO(), notes:state.notes}; }
+function snapshot(){ return {version:1, updatedAt:nowISO(), notes:state.notes, tagDefs:state.tagDefs}; }
 function markDirty(){ dirty=true; clearTimeout(saveTimer); saveTimer=setTimeout(flush, 2000); }
 async function flush(){
   if(!dirty) return; dirty=false;
@@ -328,6 +332,7 @@ async function afterAuth(){
   try{
     const data = await store.load();
     state.notes = (data.notes||[]).map(normalize);
+    state.tagDefs = [...new Set([...(data.tagDefs||[]), ...state.notes.flatMap(n=>n.tags)])];
     $("#overlay").style.display="none";
     $("#acct").textContent = MOCK ? "（モック）" : "接続済み";
     renderAll();
@@ -347,7 +352,14 @@ function normalize(n){
 /* ============================================================
    描画
    ============================================================ */
-function allTags(){ const m=new Map(); state.notes.forEach(n=>{ if(n.archived)return; n.tags.forEach(t=>m.set(t,(m.get(t)||0)+1)); }); return [...m.entries()].sort((a,b)=>a[0].localeCompare(b[0],"ja")); }
+function allTags(){
+  const m=new Map();
+  state.notes.forEach(n=>{ if(n.archived)return; n.tags.forEach(t=>m.set(t,(m.get(t)||0)+1)); });
+  const names=new Set([...(state.tagDefs||[]), ...m.keys()]);
+  return [...names].map(t=>[t, m.get(t)||0]).sort((a,b)=>a[0].localeCompare(b[0],"ja"));
+}
+function registerTag(t){ t=(t||"").trim(); if(t && !state.tagDefs.includes(t)) state.tagDefs.push(t); }
+function createTag(name){ name=(name||"").trim().replace(/^#/,""); if(!name) return false; if(!state.tagDefs.includes(name)){ state.tagDefs.push(name); markDirty(); renderAll(); } return true; }
 
 function mkNav(label,{active=false,count="",onClick}={}){
   const d=el("div","navitem"+(active?" active":""));
@@ -383,7 +395,8 @@ function visibleNotes(){
     if(tags.length) list=list.filter(n=> tags.every(t=>n.tags.includes(t)));
   }else{
     if(state.view==="ARCHIVE") list=list.filter(n=>n.archived);
-    else { list=list.filter(n=>!n.archived); if(tags.length) list=list.filter(n=> tags.every(t=>n.tags.includes(t))); }
+    else if(tags.length) list=list.filter(n=> tags.every(t=>n.tags.includes(t))); // タグ絞り込みはアーカイブも含む
+    else list=list.filter(n=>!n.archived);
   }
   if(state.sort==="updated") list.sort((a,b)=> (b.updatedAt||"").localeCompare(a.updatedAt||""));
   else list.sort((a,b)=> (a.order||0)-(b.order||0));
@@ -400,6 +413,7 @@ function autoGrow(ta){ ta.style.height="auto"; ta.style.height=(ta.scrollHeight)
 
 function renderCard(n){
   const c=el("div","card"); c.dataset.id=n.id; c.style.background=hexOf(n.color);
+  if(n.archived){ c.classList.add("archived"); const badge=el("div","arcbadge"); badge.textContent="🗄 アーカイブ"; c.appendChild(badge); }
 
   const ta=el("textarea"); ta.value=n.text; ta.rows=1; c.appendChild(ta);
   requestAnimationFrame(()=>autoGrow(ta));
@@ -413,7 +427,8 @@ function renderCard(n){
       ch.querySelector(".x").onclick=()=>{ n.tags=n.tags.filter(x=>x!==t); n.updatedAt=nowISO(); markDirty(); renderChips(); renderSide(); };
       chips.appendChild(ch); });
     const ti=el("input","taginput sm"); ti.placeholder="#タグ";
-    ti.onkeydown=e=>{ if(e.key==="Enter"){ const v=ti.value.trim().replace(/^#/,""); if(v&&!n.tags.includes(v)){ n.tags.push(v); n.updatedAt=nowISO(); markDirty(); renderChips(); renderSide(); } ti.value=""; } };
+    ti.setAttribute("list","tagOptions");
+    ti.onkeydown=e=>{ if(e.key==="Enter"){ const v=ti.value.trim().replace(/^#/,""); if(v&&!n.tags.includes(v)){ n.tags.push(v); registerTag(v); n.updatedAt=nowISO(); markDirty(); renderChips(); renderSide(); } ti.value=""; } };
     chips.appendChild(ti);
   }
   renderChips();
@@ -575,7 +590,7 @@ function deleteNote(n){
 }
 
 /* ---------- tags merge from body ---------- */
-function mergeTags(n){ extractTags(n.text).forEach(t=>{ if(!n.tags.includes(t)) n.tags.push(t); }); }
+function mergeTags(n){ extractTags(n.text).forEach(t=>{ if(!n.tags.includes(t)) n.tags.push(t); registerTag(t); }); }
 
 /* ============================================================
    compose（新規追加）
@@ -591,6 +606,7 @@ function addNoteFromCompose(){
   const maxOrder=state.notes.reduce((m,x)=>Math.max(m,x.order||0),0);
   const n=normalize({ text, color:state.composeColor, order:maxOrder+1, tags:extractTags(text) });
   const extraTag=$("#cTag").value.trim().replace(/^#/,""); if(extraTag && !n.tags.includes(extraTag)) n.tags.push(extraTag);
+  n.tags.forEach(registerTag);
   n.attachments=state.composeAtts.slice();
   state.notes.push(n);
   // reset
@@ -603,23 +619,41 @@ function addNoteFromCompose(){
    tag manager
    ============================================================ */
 function openTagManager(){
-  const tags=[...new Set(state.notes.flatMap(n=>n.tags))].sort((a,b)=>a.localeCompare(b,"ja"));
   const bg=el("div","modal-bg"); const m=el("div","modal");
-  m.innerHTML="<h3>タグ管理</h3>";
-  if(!tags.length) m.innerHTML+="<p style='color:#999;font-size:13px'>タグはまだありません。</p>";
-  tags.forEach(t=>{
-    const row=el("div","tagrow"); const nm=el("span","nm"); nm.textContent="# "+t; row.appendChild(nm);
+  const h=el("h3"); h.textContent="タグ管理"; m.appendChild(h);
+  // 新しいタグを作成（メモに付けなくても作れる）
+  const crow=el("div","tagrow");
+  const ci=el("input","taginput"); ci.placeholder="新しいタグ名"; ci.style.flex="1";
+  const cbtn=el("button","mini"); cbtn.textContent="＋ 作成";
+  const doCreate=()=>{ if(createTag(ci.value)){ bg.remove(); openTagManager(); } };
+  cbtn.onclick=doCreate; ci.onkeydown=e=>{ if(e.key==="Enter") doCreate(); };
+  crow.appendChild(ci); crow.appendChild(cbtn); m.appendChild(crow);
+  // 一覧
+  const list=allTags();
+  if(!list.length){ const pp=el("p"); pp.style.cssText="color:#999;font-size:13px"; pp.textContent="タグはまだありません。上の欄で作成できます。"; m.appendChild(pp); }
+  list.forEach(([t,c])=>{
+    const row=el("div","tagrow"); const nm=el("span","nm"); nm.textContent="# "+t+"　("+c+"件)"; row.appendChild(nm);
     const bR=el("button","mini"); bR.textContent="名前変更";
     bR.onclick=()=>{ const nv=prompt("新しいタグ名", t); if(nv&&nv.trim()){ renameTag(t,nv.trim().replace(/^#/,"")); bg.remove(); openTagManager(); } };
     const bD=el("button","mini"); bD.textContent="削除";
-    bD.onclick=()=>{ if(confirm(`タグ「${t}」を全メモから外します。よろしいですか？`)){ deleteTag(t); bg.remove(); openTagManager(); } };
+    bD.onclick=()=>{ if(confirm(`タグ「${t}」を削除します（全メモから外し、一覧からも消えます）。よろしいですか？`)){ deleteTag(t); bg.remove(); openTagManager(); } };
     row.appendChild(bR); row.appendChild(bD); m.appendChild(row);
   });
   const cl=el("div","close"); const cb=el("button","mini"); cb.textContent="閉じる"; cb.onclick=()=>bg.remove(); cl.appendChild(cb); m.appendChild(cl);
   bg.appendChild(m); bg.onclick=e=>{ if(e.target===bg)bg.remove(); }; document.body.appendChild(bg);
 }
-function renameTag(from,to){ state.notes.forEach(n=>{ if(n.tags.includes(from)){ n.tags=[...new Set(n.tags.map(t=>t===from?to:t))]; n.updatedAt=nowISO(); } }); markDirty(); renderAll(); }
-function deleteTag(t){ state.notes.forEach(n=>{ if(n.tags.includes(t)){ n.tags=n.tags.filter(x=>x!==t); n.updatedAt=nowISO(); } }); markDirty(); renderAll(); }
+function renameTag(from,to){
+  state.tagDefs=[...new Set(state.tagDefs.map(t=>t===from?to:t))];
+  state.notes.forEach(n=>{ if(n.tags.includes(from)){ n.tags=[...new Set(n.tags.map(t=>t===from?to:t))]; n.updatedAt=nowISO(); } });
+  if(state.tags.has(from)){ state.tags.delete(from); state.tags.add(to); }
+  markDirty(); renderAll();
+}
+function deleteTag(t){
+  state.tagDefs=state.tagDefs.filter(x=>x!==t);
+  state.notes.forEach(n=>{ if(n.tags.includes(t)){ n.tags=n.tags.filter(x=>x!==t); n.updatedAt=nowISO(); } });
+  state.tags.delete(t);
+  markDirty(); renderAll();
+}
 
 /* ============================================================
    menu: export / import
@@ -706,7 +740,8 @@ function setupComposeAttach(){
 /* ============================================================
    render / events
    ============================================================ */
-function renderAll(){ renderSide(); renderGrid(); }
+function refreshTagOptions(){ const dl=$("#tagOptions"); if(!dl)return; dl.innerHTML=""; allTags().forEach(([t])=>{ const o=el("option"); o.value=t; dl.appendChild(o); }); }
+function renderAll(){ renderSide(); renderGrid(); refreshTagOptions(); }
 
 function bindEvents(){
   $("#search").addEventListener("input",e=>{ state.q=e.target.value; renderGrid(); });

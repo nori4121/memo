@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>メモ</title>
+<style>
+  :root{
+    --bg:#fafafa; --ink:#222; --sub:#666; --line:#dcdcdc; --line2:#c8c8c8;
+    --chip:#eef0f2; --accent:#5b7fa6;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; }
+  body{ font-family:"BIZ UDPGothic","Yu Gothic UI","Noto Sans CJK JP",sans-serif; color:var(--ink); background:var(--bg); }
+  button{ font-family:inherit; }
+
+  /* ---- header ---- */
+  header{ position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:10px;
+    padding:8px 14px; background:#fff; border-bottom:1px solid var(--line); }
+  header .title{ font-weight:700; font-size:16px; margin-right:4px; }
+  #search{ flex:1; max-width:420px; padding:7px 12px; border:1px solid var(--line2); border-radius:20px; font-size:13.5px; }
+  .hbtn{ border:1px solid var(--line2); background:#fff; border-radius:6px; padding:6px 10px; font-size:12.5px; cursor:pointer; color:#333; }
+  .hbtn:hover{ background:#f2f2f2; }
+  .spacer{ flex:1; }
+  #acct{ font-size:12px; color:var(--sub); }
+
+  /* ---- layout ---- */
+  .main{ display:flex; align-items:flex-start; }
+  aside{ position:sticky; top:53px; width:190px; flex:none; padding:14px 10px; height:calc(100vh - 53px); overflow:auto; border-right:1px solid var(--line); background:#fcfcfc; }
+  aside .grp{ font-size:11px; color:#999; margin:10px 6px 4px; }
+  .navitem{ display:flex; align-items:center; gap:6px; padding:6px 10px; border-radius:8px; font-size:13px; cursor:pointer; color:#333; }
+  .navitem:hover{ background:#eee; }
+  .navitem.active{ background:#e6edf5; color:#123; font-weight:600; }
+  .navitem .cnt{ margin-left:auto; font-size:11px; color:#999; }
+  .content{ flex:1; padding:16px; }
+
+  /* ---- compose ---- */
+  .compose{ max-width:600px; margin:0 auto 20px; background:#fff; border:1px solid var(--line2); border-radius:10px; box-shadow:0 1px 3px rgba(0,0,0,.06); padding:10px 12px; }
+  .compose textarea{ width:100%; border:0; resize:none; font:inherit; font-size:14px; outline:none; min-height:24px; background:transparent; }
+  .compose .row{ display:flex; align-items:center; gap:8px; margin-top:6px; }
+  .taginput{ border:1px dashed var(--line2); border-radius:6px; padding:3px 8px; font:inherit; font-size:12px; width:130px; }
+  .mini{ border:1px solid var(--line2); background:#fff; border-radius:6px; padding:4px 9px; font-size:12px; cursor:pointer; }
+  .mini:hover{ background:#f2f2f2; }
+  .addbtn{ margin-left:auto; background:var(--accent); color:#fff; border:0; border-radius:6px; padding:6px 16px; font-size:13px; cursor:pointer; }
+  .addbtn:hover{ filter:brightness(.95); }
+
+  /* ---- color dots ---- */
+  .dots{ display:flex; gap:5px; }
+  .dot{ width:18px; height:18px; border-radius:50%; border:1px solid #bbb; cursor:pointer; }
+  .dot.sel{ outline:2px solid #333; outline-offset:1px; }
+
+  /* ---- grid & cards ---- */
+  #grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px; align-items:start; max-width:1200px; }
+  .card{ border:1px solid var(--line2); border-radius:10px; padding:10px 12px 8px; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.05); display:flex; flex-direction:column; gap:6px; position:relative; }
+  .card.drag{ opacity:.4; }
+  .card.over{ outline:2px dashed var(--accent); }
+  .card textarea{ width:100%; border:0; resize:none; font:inherit; font-size:13.5px; line-height:1.6; outline:none; background:transparent; overflow:hidden; }
+  .card .firstline{ font-weight:700; }
+  .chips{ display:flex; flex-wrap:wrap; gap:4px; }
+  .chip{ display:inline-flex; align-items:center; gap:3px; background:var(--chip); border:1px solid #d7dbe0; border-radius:11px; padding:0 8px; font-size:11px; color:#445; }
+  .chip .x{ cursor:pointer; color:#889; font-weight:700; }
+  .atts{ display:flex; flex-wrap:wrap; gap:6px; }
+  .att-img{ width:64px; height:64px; object-fit:cover; border-radius:6px; border:1px solid var(--line2); cursor:pointer; }
+  .att-file{ display:inline-flex; align-items:center; gap:4px; border:1px solid var(--line2); border-radius:6px; padding:2px 7px; font-size:11px; color:#445; cursor:pointer; background:#fafafa; max-width:100%; }
+  .att-file .rm,.att-img-wrap .rm{ cursor:pointer; color:#a55; font-weight:700; }
+  .att-img-wrap{ position:relative; }
+  .att-img-wrap .rm{ position:absolute; top:-6px; right:-6px; background:#fff; border:1px solid var(--line2); border-radius:50%; width:16px; height:16px; line-height:14px; text-align:center; font-size:11px; }
+  .cardfoot{ display:flex; align-items:center; gap:6px; margin-top:2px; border-top:1px solid #eee; padding-top:5px; }
+  .cardfoot .date{ font-size:10.5px; color:#aaa; margin-right:auto; }
+  .icon{ border:0; background:transparent; cursor:pointer; font-size:14px; color:#888; padding:2px 4px; border-radius:5px; }
+  .icon:hover{ background:#eee; color:#333; }
+  .handle{ cursor:grab; color:#bbb; }
+  .taginput.sm{ width:90px; }
+
+  /* ---- popover / modal ---- */
+  .pop{ position:absolute; z-index:30; background:#fff; border:1px solid var(--line2); border-radius:8px; box-shadow:0 4px 14px rgba(0,0,0,.15); padding:8px; }
+  .modal-bg{ position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:50; display:flex; align-items:center; justify-content:center; }
+  .modal{ background:#fff; border-radius:10px; padding:18px 20px; width:min(460px,92vw); max-height:82vh; overflow:auto; }
+  .modal h3{ margin:0 0 12px; font-size:15px; }
+  .tagrow{ display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid #eee; font-size:13px; }
+  .tagrow .nm{ flex:1; }
+  .modal .close{ margin-top:14px; text-align:right; }
+
+  .empty{ text-align:center; color:#aaa; font-size:13px; margin-top:40px; }
+  #overlay{ position:fixed; inset:0; background:rgba(250,250,250,.97); z-index:100; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; }
+  #overlay h1{ font-size:20px; margin:0; }
+  #overlay p{ color:var(--sub); font-size:13px; max-width:340px; text-align:center; margin:0; }
+  #connect{ background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 22px; font-size:14px; cursor:pointer; }
+  .toast{ position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#333; color:#fff; padding:8px 16px; border-radius:8px; font-size:12.5px; z-index:200; opacity:0; transition:opacity .2s; }
+  .toast.show{ opacity:.95; }
+
+  @media(max-width:640px){
+    aside{ position:static; width:100%; height:auto; display:flex; flex-wrap:wrap; gap:4px; border-right:0; border-bottom:1px solid var(--line); }
+    aside .grp{ width:100%; }
+    .main{ flex-direction:column; }
+    #grid{ grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="title">メモ</span>
+  <input id="search" placeholder="検索（キーワード・アーカイブも対象）">
+  <button class="hbtn" id="sortBtn" title="並び順">並び：更新日順</button>
+  <div class="spacer"></div>
+  <span id="acct"></span>
+  <button class="hbtn" id="menuBtn">メニュー ▾</button>
+</header>
+
+<div class="main">
+  <aside id="side"></aside>
+  <div class="content">
+    <div class="compose">
+      <textarea id="cText" rows="1" placeholder="メモを入力…（1行目が見出し）"></textarea>
+      <div class="row">
+        <input class="taginput" id="cTag" placeholder="#タグ 追加（Enter）">
+        <button class="mini" id="cAttach">📎 添付</button>
+        <div class="dots" id="cDots"></div>
+        <button class="addbtn" id="cAdd">追加</button>
+      </div>
+    </div>
+    <div id="grid"></div>
+    <div class="empty" id="empty" style="display:none">メモがありません。上の欄から追加できます。</div>
+  </div>
+</div>
+
+<div id="overlay">
+  <h1>メモ</h1>
+  <p>Googleドライブに保存します。続けるにはGoogleに接続してください。</p>
+  <button id="connect">Googleに接続</button>
+  <p id="ovmsg" style="font-size:11px;color:#999"></p>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+"use strict";
+/* ============================================================
+   メモ（Keep風）— 単一HTML / Googleドライブ保存(drive.file)
+   ============================================================ */
+const CONFIG = {
+  CLIENT_ID: "162155904085-ud13pisfjodgim2t19q9n2us70ekc9n4.apps.googleusercontent.com",
+  SCOPE: "https://www.googleapis.com/auth/drive.file",
+  FOLDER_NAME: "メモツール",
+  NOTES_FILE: "notes.json",
+  MAX_ATT_MB: 20,
+};
+const PALETTE = [
+  {key:"none",   name:"なし",     hex:"#ffffff"},
+  {key:"gray",   name:"グレー",   hex:"#f1f3f4"},
+  {key:"yellow", name:"イエロー", hex:"#fdf3c7"},
+  {key:"green",  name:"グリーン", hex:"#d9ead3"},
+  {key:"blue",   name:"ブルー",   hex:"#d0e2f3"},
+  {key:"red",    name:"レッド",   hex:"#f4d9d7"},
+  {key:"purple", name:"パープル", hex:"#e6dcf0"},
+];
+const hexOf = k => (PALETTE.find(p=>p.key===k)||PALETTE[0]).hex;
+
+const MOCK = new URLSearchParams(location.search).has("mock");
+
+/* ---------- state ---------- */
+let state = {
+  notes: [],
+  view: "ALL",         // ALL | ARCHIVE | tag名
+  q: "",
+  sort: "updated",     // updated | manual
+  composeColor: "none",
+  composeAtts: [],     // pending {name,type,size,_file/_url}
+};
+let dirty = false, saveTimer = null;
+
+/* ---------- utils ---------- */
+const $  = s => document.querySelector(s);
+const el = (t,c)=>{const e=document.createElement(t); if(c)e.className=c; return e;};
+const uid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+const nowISO = () => new Date().toISOString();
+const esc = s => (s||"").replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));
+function fmtDate(iso){ if(!iso) return ""; const d=new Date(iso); const p=n=>String(n).padStart(2,"0");
+  return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function fmtSize(b){ if(b<1024)return b+"B"; if(b<1048576)return (b/1024).toFixed(0)+"KB"; return (b/1048576).toFixed(1)+"MB"; }
+function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove("show"),1600); }
+function extractTags(text){ const set=new Set(); const re=/#([^\s#　]+)/g; let m; while((m=re.exec(text))) set.add(m[1]); return [...set]; }
+
+/* ============================================================
+   Store 抽象化: DriveStore（本番） / MockStore（?mock=1 でテスト）
+   ============================================================ */
+let accessToken = null, tokenClient = null, folderId = null, notesFileId = null;
+
+const DriveStore = {
+  async api(path, opts={}){
+    const res = await fetch("https://www.googleapis.com/"+path, {
+      ...opts,
+      headers:{ Authorization:"Bearer "+accessToken, ...(opts.headers||{}) },
+    });
+    if(res.status===401){ throw new Error("UNAUTH"); }
+    return res;
+  },
+  async ensureFolder(){
+    if(folderId) return folderId;
+    const q = encodeURIComponent(`name='${CONFIG.FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+    let r = await this.api("drive/v3/files?q="+q+"&fields=files(id,name)&spaces=drive");
+    let j = await r.json();
+    if(j.files && j.files.length){ folderId = j.files[0].id; return folderId; }
+    r = await this.api("drive/v3/files", {method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name:CONFIG.FOLDER_NAME, mimeType:"application/vnd.google-apps.folder"})});
+    j = await r.json(); folderId = j.id; return folderId;
+  },
+  async load(){
+    await this.ensureFolder();
+    const q = encodeURIComponent(`name='${CONFIG.NOTES_FILE}' and '${folderId}' in parents and trashed=false`);
+    const r = await this.api("drive/v3/files?q="+q+"&fields=files(id,name)");
+    const j = await r.json();
+    if(j.files && j.files.length){
+      notesFileId = j.files[0].id;
+      const rc = await this.api("drive/v3/files/"+notesFileId+"?alt=media");
+      const data = await rc.json();
+      return data;
+    }
+    return {version:1, notes:[]};
+  },
+  _multipart(metadata, blob){
+    const boundary = "memoBoundary"+Math.random().toString(36).slice(2);
+    const head = "--"+boundary+"\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n"+JSON.stringify(metadata)
+      + "\r\n--"+boundary+"\r\nContent-Type: "+(blob.type||"application/octet-stream")+"\r\n\r\n";
+    const tail = "\r\n--"+boundary+"--";
+    const body = new Blob([head, blob, tail], {type:"multipart/related; boundary="+boundary});
+    return {body, ct:"multipart/related; boundary="+boundary};
+  },
+  async save(data){
+    await this.ensureFolder();
+    const meta = {name:CONFIG.NOTES_FILE, mimeType:"application/json"};
+    if(!notesFileId) meta.parents=[folderId];
+    const blob = new Blob([JSON.stringify(data)], {type:"application/json"});
+    const {body, ct} = this._multipart(meta, blob);
+    const method = notesFileId ? "PATCH" : "POST";
+    const url = "upload/drive/v3/files"+(notesFileId?("/"+notesFileId):"")+"?uploadType=multipart&fields=id";
+    const r = await this.api(url, {method, headers:{"Content-Type":ct}, body});
+    const j = await r.json(); if(j.id) notesFileId=j.id;
+  },
+  async uploadAttachment(file){
+    await this.ensureFolder();
+    const meta = {name:file.name, parents:[folderId]};
+    const {body, ct} = this._multipart(meta, file);
+    const r = await this.api("upload/drive/v3/files?uploadType=multipart&fields=id", {method:"POST", headers:{"Content-Type":ct}, body});
+    const j = await r.json();
+    return {id:uid("a_"), name:file.name, type:file.type||"application/octet-stream", size:file.size, driveFileId:j.id};
+  },
+  async attUrl(att){
+    const r = await this.api("drive/v3/files/"+att.driveFileId+"?alt=media");
+    const blob = await r.blob();
+    return URL.createObjectURL(blob);
+  },
+  async deleteAttachment(att){
+    try{ await this.api("drive/v3/files/"+att.driveFileId, {method:"DELETE"}); }catch(e){}
+  }
+};
+
+const MockStore = {
+  _key:"__memo_mock__",
+  async load(){ try{ return JSON.parse(localStorage.getItem(this._key)) || {version:1,notes:[]}; }catch(e){ return {version:1,notes:[]}; } },
+  async save(data){ try{ localStorage.setItem(this._key, JSON.stringify(data)); }catch(e){} },
+  async uploadAttachment(file){
+    const url = await new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.readAsDataURL(file); });
+    return {id:uid("a_"), name:file.name, type:file.type||"application/octet-stream", size:file.size, _dataUrl:url};
+  },
+  async attUrl(att){ return att._dataUrl; },
+  async deleteAttachment(){},
+};
+let store = MOCK ? MockStore : DriveStore;
+
+/* ============================================================
+   保存（デバウンス2秒） / データ整形
+   ============================================================ */
+function snapshot(){ return {version:1, updatedAt:nowISO(), notes:state.notes}; }
+function markDirty(){ dirty=true; clearTimeout(saveTimer); saveTimer=setTimeout(flush, 2000); }
+async function flush(){
+  if(!dirty) return; dirty=false;
+  try{ await store.save(snapshot()); toast("保存しました"); }
+  catch(e){ if(String(e.message).includes("UNAUTH")){ reauth(); } else { dirty=true; toast("保存に失敗（再試行します）"); clearTimeout(saveTimer); saveTimer=setTimeout(flush,4000);} }
+}
+window.addEventListener("beforeunload", e=>{ if(dirty){ e.preventDefault(); e.returnValue=""; } });
+
+/* ============================================================
+   認証
+   ============================================================ */
+function reauth(){ if(tokenClient) tokenClient.requestAccessToken({prompt:""}); }
+function initAuth(){
+  if(MOCK){ afterAuth(); return; }
+  if(!window.google || !google.accounts){ setTimeout(initAuth, 300); return; }
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CONFIG.CLIENT_ID, scope: CONFIG.SCOPE,
+    callback: (resp)=>{ if(resp.error){ $("#ovmsg").textContent="認証エラー: "+resp.error; return; }
+      accessToken = resp.access_token; afterAuth(); },
+  });
+  $("#connect").onclick = ()=> tokenClient.requestAccessToken({prompt:"consent"});
+  $("#ovmsg").textContent="";
+}
+async function afterAuth(){
+  try{
+    const data = await store.load();
+    state.notes = (data.notes||[]).map(normalize);
+    $("#overlay").style.display="none";
+    $("#acct").textContent = MOCK ? "（モック）" : "接続済み";
+    renderAll();
+    setTimeout(()=>$("#cText").focus(), 60);
+  }catch(e){
+    if(String(e.message).includes("UNAUTH")){ reauth(); }
+    else { $("#overlay").style.display="flex"; $("#ovmsg").textContent="読込エラー: "+e.message; }
+  }
+}
+function normalize(n){
+  return { id:n.id||uid("n_"), text:n.text||"", tags:Array.isArray(n.tags)?n.tags:[],
+    color:n.color||"none", archived:!!n.archived, order:typeof n.order==="number"?n.order:0,
+    attachments:Array.isArray(n.attachments)?n.attachments:[],
+    createdAt:n.createdAt||nowISO(), updatedAt:n.updatedAt||n.createdAt||nowISO() };
+}
+
+/* ============================================================
+   描画
+   ============================================================ */
+function allTags(){ const m=new Map(); state.notes.forEach(n=>{ if(n.archived)return; n.tags.forEach(t=>m.set(t,(m.get(t)||0)+1)); }); return [...m.entries()].sort((a,b)=>a[0].localeCompare(b[0],"ja")); }
+
+function renderSide(){
+  const side=$("#side"); side.innerHTML="";
+  const g1=el("div","grp"); g1.textContent="表示"; side.appendChild(g1);
+  const activeCount = state.notes.filter(n=>!n.archived).length;
+  const arcCount = state.notes.filter(n=>n.archived).length;
+  side.appendChild(navItem("🗒️ すべて","ALL",activeCount));
+  const g2=el("div","grp"); g2.textContent="タグ"; side.appendChild(g2);
+  allTags().forEach(([t,c])=> side.appendChild(navItem("# "+t, t, c)));
+  const g3=el("div","grp"); g3.textContent=""; side.appendChild(g3);
+  side.appendChild(navItem("🗄️ アーカイブ","ARCHIVE",arcCount));
+  const mng=navItem("⚙️ タグ管理","__manage__",""); mng.onclick=openTagManager; side.appendChild(mng);
+}
+function navItem(label,view,count){
+  const d=el("div","navitem"+(state.view===view?" active":""));
+  const s=el("span"); s.textContent=label; d.appendChild(s);
+  if(count!==""){ const c=el("span","cnt"); c.textContent=count; d.appendChild(c); }
+  if(view!=="__manage__") d.onclick=()=>{ state.view=view; renderAll(); };
+  return d;
+}
+
+function visibleNotes(){
+  const q=state.q.trim().toLowerCase();
+  let list=state.notes.slice();
+  if(q){
+    // 検索時はアーカイブも対象
+    list=list.filter(n=> n.text.toLowerCase().includes(q) || n.tags.some(t=>t.toLowerCase().includes(q)) );
+    if(state.view!=="ALL" && state.view!=="ARCHIVE") list=list.filter(n=>n.tags.includes(state.view));
+  }else{
+    if(state.view==="ARCHIVE") list=list.filter(n=>n.archived);
+    else if(state.view==="ALL") list=list.filter(n=>!n.archived);
+    else list=list.filter(n=>!n.archived && n.tags.includes(state.view));
+  }
+  if(state.sort==="updated") list.sort((a,b)=> (b.updatedAt||"").localeCompare(a.updatedAt||""));
+  else list.sort((a,b)=> (a.order||0)-(b.order||0));
+  return list;
+}
+
+function renderGrid(){
+  const grid=$("#grid"); grid.innerHTML="";
+  const list=visibleNotes();
+  $("#empty").style.display = list.length?"none":"block";
+  list.forEach(n=> grid.appendChild(renderCard(n)));
+}
+function autoGrow(ta){ ta.style.height="auto"; ta.style.height=(ta.scrollHeight)+"px"; }
+
+function renderCard(n){
+  const c=el("div","card"); c.dataset.id=n.id; c.style.background=hexOf(n.color);
+
+  const ta=el("textarea"); ta.value=n.text; ta.rows=1; c.appendChild(ta);
+  requestAnimationFrame(()=>autoGrow(ta));
+  ta.addEventListener("input",()=>autoGrow(ta));
+  ta.addEventListener("change",()=>{ n.text=ta.value; mergeTags(n); n.updatedAt=nowISO(); markDirty(); renderSide(); renderChips(); });
+
+  const chips=el("div","chips"); c.appendChild(chips);
+  function renderChips(){
+    chips.innerHTML="";
+    n.tags.forEach(t=>{ const ch=el("span","chip"); ch.innerHTML="#"+esc(t)+" <span class='x'>×</span>";
+      ch.querySelector(".x").onclick=()=>{ n.tags=n.tags.filter(x=>x!==t); n.updatedAt=nowISO(); markDirty(); renderChips(); renderSide(); };
+      chips.appendChild(ch); });
+    const ti=el("input","taginput sm"); ti.placeholder="#タグ";
+    ti.onkeydown=e=>{ if(e.key==="Enter"){ const v=ti.value.trim().replace(/^#/,""); if(v&&!n.tags.includes(v)){ n.tags.push(v); n.updatedAt=nowISO(); markDirty(); renderChips(); renderSide(); } ti.value=""; } };
+    chips.appendChild(ti);
+  }
+  renderChips();
+
+  const atts=el("div","atts"); c.appendChild(atts);
+  renderAtts(n, atts);
+
+  const foot=el("div","cardfoot");
+  const date=el("span","date"); date.textContent="更新 "+fmtDate(n.updatedAt); foot.appendChild(date);
+
+  const bAtt=iconBtn("📎","添付"); bAtt.onclick=()=>pickFiles(files=>addAttachments(n,files,atts));
+  const bColor=iconBtn("🎨","色"); bColor.onclick=(e)=>openColorPop(e,n,c);
+  const bArc=iconBtn(n.archived?"↩️":"🗄️", n.archived?"戻す":"アーカイブ");
+  bArc.onclick=()=>{ n.archived=!n.archived; n.updatedAt=nowISO(); markDirty(); renderAll(); toast(n.archived?"アーカイブしました":"通常に戻しました"); };
+  const bDel=iconBtn("🗑️","削除"); bDel.onclick=()=>{ if(confirm("このメモを完全に削除します。よろしいですか？（元に戻せません）")){ deleteNote(n); } };
+  const handle=el("span","icon handle"); handle.textContent="⠿"; handle.title="ドラッグで並べ替え（手動並び順のとき）";
+  foot.appendChild(bAtt); foot.appendChild(bColor); foot.appendChild(bArc); foot.appendChild(bDel); foot.appendChild(handle);
+  c.appendChild(foot);
+
+  setupDrag(c,n,handle);
+  return c;
+}
+function iconBtn(txt,title){ const b=el("button","icon"); b.textContent=txt; b.title=title; return b; }
+
+async function renderAtts(n, box){
+  box.innerHTML="";
+  for(const a of n.attachments){
+    if((a.type||"").startsWith("image/")){
+      const wrap=el("span","att-img-wrap");
+      const img=el("img","att-img"); img.alt=a.name;
+      try{ img.src = await store.attUrl(a); }catch(e){}
+      img.onclick=()=> window.open(img.src,"_blank");
+      const rm=el("span","rm"); rm.textContent="×"; rm.title="削除";
+      rm.onclick=()=>removeAttachment(n,a,box);
+      wrap.appendChild(img); wrap.appendChild(rm); box.appendChild(wrap);
+    }else{
+      const f=el("span","att-file"); f.innerHTML="📎 "+esc(a.name)+" <small>("+fmtSize(a.size)+")</small> <span class='rm'>×</span>";
+      f.onclick=async(e)=>{ if(e.target.classList.contains("rm")){ removeAttachment(n,a,box); return; }
+        try{ const u=await store.attUrl(a); window.open(u,"_blank"); }catch(err){} };
+      box.appendChild(f);
+    }
+  }
+}
+async function removeAttachment(n,a,box){
+  n.attachments=n.attachments.filter(x=>x!==a); n.updatedAt=nowISO(); markDirty();
+  if(!MOCK && a.driveFileId) store.deleteAttachment(a);
+  renderAtts(n,box);
+}
+async function addAttachments(n, files, box){
+  for(const file of files){
+    if(file.size > CONFIG.MAX_ATT_MB*1048576){ toast(`${file.name} は${CONFIG.MAX_ATT_MB}MBを超えています`); continue; }
+    try{ const att=await store.uploadAttachment(file); n.attachments.push(att); }catch(e){ toast("添付の保存に失敗"); }
+  }
+  n.updatedAt=nowISO(); markDirty(); renderAtts(n,box);
+}
+
+/* ---------- drag reorder (手動並び順のみ) ---------- */
+let dragId=null;
+function setupDrag(card,n,handle){
+  handle.addEventListener("mousedown",()=>{ card.draggable=true; });
+  handle.addEventListener("mouseup",()=>{ card.draggable=false; });
+  card.addEventListener("dragstart",e=>{ if(state.sort!=="manual"){ e.preventDefault(); toast("『手動並び順』のときだけ並べ替えできます"); return; } dragId=n.id; card.classList.add("drag"); });
+  card.addEventListener("dragend",()=>{ card.classList.remove("drag"); card.draggable=false; document.querySelectorAll(".card.over").forEach(x=>x.classList.remove("over")); });
+  card.addEventListener("dragover",e=>{ if(dragId&&dragId!==n.id){ e.preventDefault(); card.classList.add("over"); } });
+  card.addEventListener("dragleave",()=>card.classList.remove("over"));
+  card.addEventListener("drop",e=>{ e.preventDefault(); card.classList.remove("over"); if(!dragId||dragId===n.id)return; reorder(dragId,n.id); dragId=null; });
+}
+function reorder(fromId,toId){
+  const list=visibleNotes();
+  const ids=list.map(x=>x.id);
+  const fi=ids.indexOf(fromId), ti=ids.indexOf(toId);
+  if(fi<0||ti<0)return;
+  ids.splice(ti,0,ids.splice(fi,1)[0]);
+  ids.forEach((id,i)=>{ const nn=state.notes.find(x=>x.id===id); if(nn) nn.order=i; });
+  markDirty(); renderGrid();
+}
+
+/* ---------- color popover ---------- */
+function openColorPop(e,n,card){
+  closePops();
+  const pop=el("div","pop"); const dots=el("div","dots");
+  PALETTE.forEach(p=>{ const d=el("span","dot"+(n.color===p.key?" sel":"")); d.style.background=p.hex; d.title=p.name;
+    d.onclick=()=>{ n.color=p.key; card.style.background=p.hex; n.updatedAt=nowISO(); markDirty(); closePops(); };
+    dots.appendChild(d); });
+  pop.appendChild(dots); document.body.appendChild(pop);
+  const r=e.target.getBoundingClientRect(); pop.style.left=(r.left+window.scrollX-40)+"px"; pop.style.top=(r.bottom+window.scrollY+4)+"px";
+  setTimeout(()=>document.addEventListener("click",closePops,{once:true}),0);
+}
+function closePops(){ document.querySelectorAll(".pop").forEach(p=>p.remove()); }
+
+/* ---------- delete ---------- */
+function deleteNote(n){
+  (n.attachments||[]).forEach(a=>{ if(!MOCK && a.driveFileId) store.deleteAttachment(a); });
+  state.notes=state.notes.filter(x=>x.id!==n.id); markDirty(); renderAll(); toast("削除しました");
+}
+
+/* ---------- tags merge from body ---------- */
+function mergeTags(n){ extractTags(n.text).forEach(t=>{ if(!n.tags.includes(t)) n.tags.push(t); }); }
+
+/* ============================================================
+   compose（新規追加）
+   ============================================================ */
+function renderComposeDots(){
+  const box=$("#cDots"); box.innerHTML="";
+  PALETTE.forEach(p=>{ const d=el("span","dot"+(state.composeColor===p.key?" sel":"")); d.style.background=p.hex; d.title=p.name;
+    d.onclick=()=>{ state.composeColor=p.key; renderComposeDots(); }; box.appendChild(d); });
+}
+function addNoteFromCompose(){
+  const text=$("#cText").value.trim();
+  if(!text && state.composeAtts.length===0){ $("#cText").focus(); return; }
+  const maxOrder=state.notes.reduce((m,x)=>Math.max(m,x.order||0),0);
+  const n=normalize({ text, color:state.composeColor, order:maxOrder+1, tags:extractTags(text) });
+  const extraTag=$("#cTag").value.trim().replace(/^#/,""); if(extraTag && !n.tags.includes(extraTag)) n.tags.push(extraTag);
+  n.attachments=state.composeAtts.slice();
+  state.notes.push(n);
+  // reset
+  $("#cText").value=""; $("#cTag").value=""; state.composeColor="none"; state.composeAtts=[];
+  autoGrow($("#cText")); renderComposeDots();
+  markDirty(); renderAll(); $("#cText").focus();
+}
+
+/* ============================================================
+   tag manager
+   ============================================================ */
+function openTagManager(){
+  const tags=[...new Set(state.notes.flatMap(n=>n.tags))].sort((a,b)=>a.localeCompare(b,"ja"));
+  const bg=el("div","modal-bg"); const m=el("div","modal");
+  m.innerHTML="<h3>タグ管理</h3>";
+  if(!tags.length) m.innerHTML+="<p style='color:#999;font-size:13px'>タグはまだありません。</p>";
+  tags.forEach(t=>{
+    const row=el("div","tagrow"); const nm=el("span","nm"); nm.textContent="# "+t; row.appendChild(nm);
+    const bR=el("button","mini"); bR.textContent="名前変更";
+    bR.onclick=()=>{ const nv=prompt("新しいタグ名", t); if(nv&&nv.trim()){ renameTag(t,nv.trim().replace(/^#/,"")); bg.remove(); openTagManager(); } };
+    const bD=el("button","mini"); bD.textContent="削除";
+    bD.onclick=()=>{ if(confirm(`タグ「${t}」を全メモから外します。よろしいですか？`)){ deleteTag(t); bg.remove(); openTagManager(); } };
+    row.appendChild(bR); row.appendChild(bD); m.appendChild(row);
+  });
+  const cl=el("div","close"); const cb=el("button","mini"); cb.textContent="閉じる"; cb.onclick=()=>bg.remove(); cl.appendChild(cb); m.appendChild(cl);
+  bg.appendChild(m); bg.onclick=e=>{ if(e.target===bg)bg.remove(); }; document.body.appendChild(bg);
+}
+function renameTag(from,to){ state.notes.forEach(n=>{ if(n.tags.includes(from)){ n.tags=[...new Set(n.tags.map(t=>t===from?to:t))]; n.updatedAt=nowISO(); } }); markDirty(); renderAll(); }
+function deleteTag(t){ state.notes.forEach(n=>{ if(n.tags.includes(t)){ n.tags=n.tags.filter(x=>x!==t); n.updatedAt=nowISO(); } }); markDirty(); renderAll(); }
+
+/* ============================================================
+   menu: export / import
+   ============================================================ */
+function openMenu(e){
+  closePops();
+  const pop=el("div","pop"); pop.style.right="14px"; pop.style.top="48px"; pop.style.position="fixed";
+  const mk=(label,fn)=>{ const b=el("div","navitem"); b.textContent=label; b.onclick=()=>{ closePops(); fn(); }; pop.appendChild(b); };
+  mk("⬇️ 書き出し（バックアップ）", exportData);
+  mk("⬆️ 読み込み（復元）", importData);
+  mk("💾 今すぐ保存", ()=>{ dirty=true; flush(); });
+  document.body.appendChild(pop);
+  setTimeout(()=>document.addEventListener("click",closePops,{once:true}),0);
+}
+async function exportData(){
+  // 添付も含めて1ファイルに（Base64）
+  const notes=JSON.parse(JSON.stringify(state.notes));
+  for(const n of notes){ for(const a of (n.attachments||[])){ try{ const u=await store.attUrl(a); const r=await fetch(u); const b=await r.blob();
+    a._b64=await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.readAsDataURL(b);}); }catch(e){} } }
+  const blob=new Blob([JSON.stringify({version:1,exportedAt:nowISO(),notes},null,2)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="memo-backup-"+nowISO().slice(0,10)+".json"; a.click();
+}
+function importData(){
+  pickFiles(async files=>{
+    const f=files[0]; if(!f)return; const txt=await f.text();
+    let data; try{ data=JSON.parse(txt); }catch(e){ toast("読み込めませんでした"); return; }
+    if(!confirm("現在のメモに読み込んだメモを追加します。よろしいですか？")) return;
+    for(const n of (data.notes||[])){
+      const nn=normalize(n); nn.id=uid("n_"); const newAtts=[];
+      for(const a of (nn.attachments||[])){
+        if(a._b64){ try{ const blob=await(await fetch(a._b64)).blob(); const file=new File([blob],a.name,{type:a.type}); const na=await store.uploadAttachment(file); newAtts.push(na); }catch(e){} }
+      }
+      nn.attachments=newAtts; state.notes.push(nn);
+    }
+    markDirty(); renderAll(); toast("読み込みました");
+  }, ".json");
+}
+
+/* ---------- file picker / paste / drop ---------- */
+function pickFiles(cb, accept){ const inp=el("input"); inp.type="file"; inp.multiple=true; if(accept)inp.accept=accept; inp.onchange=()=>cb([...inp.files]); inp.click(); }
+
+function setupComposeAttach(){
+  $("#cAttach").onclick=()=>pickFiles(async files=>{
+    for(const file of files){ if(file.size>CONFIG.MAX_ATT_MB*1048576){ toast(`${file.name} は${CONFIG.MAX_ATT_MB}MB超`); continue; }
+      const att=await store.uploadAttachment(file); state.composeAtts.push(att); }
+    toast(state.composeAtts.length+" 件添付（追加で確定）");
+  });
+  const cText=$("#cText");
+  cText.addEventListener("paste", async e=>{
+    const items=[...(e.clipboardData?.items||[])];
+    for(const it of items){ if(it.type.startsWith("image/")){ const file=it.getAsFile(); if(file){ const att=await store.uploadAttachment(file); state.composeAtts.push(att); toast("画像を添付（追加で確定）"); } } }
+  });
+}
+
+/* ============================================================
+   render / events
+   ============================================================ */
+function renderAll(){ renderSide(); renderGrid(); }
+
+function bindEvents(){
+  $("#search").addEventListener("input",e=>{ state.q=e.target.value; renderGrid(); });
+  $("#sortBtn").onclick=()=>{ state.sort = state.sort==="updated"?"manual":"updated";
+    $("#sortBtn").textContent = "並び："+(state.sort==="updated"?"更新日順":"手動並び順"); renderGrid(); };
+  $("#menuBtn").onclick=openMenu;
+  const cText=$("#cText");
+  cText.addEventListener("input",()=>autoGrow(cText));
+  cText.addEventListener("keydown",e=>{ if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){ addNoteFromCompose(); } });
+  $("#cTag").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); addNoteFromCompose(); } });
+  $("#cAdd").onclick=addNoteFromCompose;
+  renderComposeDots(); setupComposeAttach();
+}
+
+/* ---------- boot ---------- */
+bindEvents();
+initAuth();
+</script>
+</body>
+</html>

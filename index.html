@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>メモ</title>
-<!-- メモ（Keep風）single-file app / version: v1.9 (2026-08-12) -->
-<meta name="app-version" content="v1.9 (2026-08-12)">
+<!-- メモ（Keep風）single-file app / version: v1.11 (2026-08-12) -->
+<meta name="app-version" content="v1.11 (2026-08-12)">
 <style>
   :root{
     --bg:#fafafa; --ink:#222; --sub:#666; --line:#dcdcdc; --line2:#c8c8c8;
@@ -34,7 +34,10 @@
   .navitem{ display:flex; align-items:center; gap:6px; padding:6px 10px; border-radius:8px; font-size:13px; cursor:pointer; color:#333; }
   .navitem:hover{ background:#eee; }
   .navitem.active{ background:#e6edf5; color:#123; font-weight:600; }
+  .navitem.sub{ padding-left:20px; }
   .navitem .cnt{ margin-left:auto; font-size:11px; color:#999; }
+  .navgroup{ font-size:11.5px; color:#555; cursor:pointer; padding:5px 8px; margin-top:3px; font-weight:600; user-select:none; }
+  .navgroup:hover{ background:#eee; border-radius:6px; }
   .content{ flex:1; padding:16px; }
 
   /* ---- compose ---- */
@@ -92,9 +95,10 @@
   /* ---- popover / modal ---- */
   .pop{ position:absolute; z-index:30; background:#fff; border:1px solid var(--line2); border-radius:8px; box-shadow:0 4px 14px rgba(0,0,0,.15); padding:8px; }
   .modal-bg{ position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:50; display:flex; align-items:center; justify-content:center; }
-  .modal{ background:#fff; border-radius:10px; padding:18px 20px; width:min(460px,92vw); max-height:82vh; overflow:auto; }
+  .modal{ background:#fff; border-radius:10px; padding:18px 20px; width:min(580px,94vw); max-height:82vh; overflow:auto; }
   .modal h3{ margin:0 0 12px; font-size:15px; }
-  .tagrow{ display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid #eee; font-size:13px; }
+  .tagrow{ display:flex; align-items:center; flex-wrap:wrap; gap:6px; padding:5px 0; border-bottom:1px solid #eee; font-size:13px; }
+  .mini:disabled{ opacity:.32; cursor:default; }
   .tagrow .nm{ flex:1; }
   .modal .close{ margin-top:14px; text-align:right; }
 
@@ -160,7 +164,7 @@
 /* ============================================================
    メモ（Keep風）— 単一HTML / Googleドライブ保存(drive.file)
    ============================================================ */
-const APP_VERSION = "v1.9 (2026-08-12)";
+const APP_VERSION = "v1.11 (2026-08-12)";
 const CONFIG = {
   CLIENT_ID: "162155904085-ud13pisfjodgim2t19q9n2us70ekc9n4.apps.googleusercontent.com",
   SCOPE: "https://www.googleapis.com/auth/drive.file",
@@ -185,6 +189,8 @@ const MOCK = new URLSearchParams(location.search).has("mock");
 let state = {
   notes: [],
   tagDefs: [],         // マスタータグ一覧（メモ未使用でも保持）
+  groups: [],          // タググループ [{name, tags:[...]}]
+  collapsed: new Set(),// 折りたたみ中のグループ名
   view: "ALL",         // ALL | ARCHIVE
   tags: new Set(),     // 選択中のタグ（複数選択でAND絞り込み）
   q: "",
@@ -296,7 +302,7 @@ let store = MOCK ? MockStore : DriveStore;
 /* ============================================================
    保存（デバウンス2秒） / データ整形
    ============================================================ */
-function snapshot(){ return {version:1, updatedAt:nowISO(), notes:state.notes, tagDefs:state.tagDefs}; }
+function snapshot(){ return {version:1, updatedAt:nowISO(), notes:state.notes, tagDefs:state.tagDefs, tagGroups:state.groups}; }
 function markDirty(){ dirty=true; clearTimeout(saveTimer); saveTimer=setTimeout(flush, 2000); }
 async function flush(){
   if(!dirty) return; dirty=false;
@@ -333,6 +339,7 @@ async function afterAuth(){
     const data = await store.load();
     state.notes = (data.notes||[]).map(normalize);
     state.tagDefs = [...new Set([...(data.tagDefs||[]), ...state.notes.flatMap(n=>n.tags)])];
+    state.groups = Array.isArray(data.tagGroups) ? data.tagGroups.map(g=>({name:g.name, tags:Array.isArray(g.tags)?g.tags:[]})) : [];
     $("#overlay").style.display="none";
     $("#acct").textContent = MOCK ? "（モック）" : "接続済み";
     renderAll();
@@ -360,12 +367,51 @@ function allTags(){
 }
 function registerTag(t){ t=(t||"").trim(); if(t && !state.tagDefs.includes(t)) state.tagDefs.push(t); }
 function createTag(name){ name=(name||"").trim().replace(/^#/,""); if(!name) return false; if(!state.tagDefs.includes(name)){ state.tagDefs.push(name); markDirty(); renderAll(); } return true; }
+/* ---- タググループ ---- */
+function createGroup(name){ name=(name||"").trim(); if(!name) return false; if(!state.groups.find(g=>g.name===name)){ state.groups.push({name, tags:[]}); markDirty(); renderAll(); } return true; }
+function deleteGroup(name){ state.groups=state.groups.filter(g=>g.name!==name); markDirty(); renderAll(); }
+function groupOf(tag){ const g=state.groups.find(g=>g.tags.includes(tag)); return g?g.name:null; }
+function setTagGroup(tag, groupName){
+  state.groups.forEach(g=>{ g.tags=g.tags.filter(t=>t!==tag); });
+  if(groupName){ const g=state.groups.find(x=>x.name===groupName); if(g && !g.tags.includes(tag)) g.tags.push(tag); }
+  markDirty(); renderAll();
+}
+const COLLAPSE_KEY="__memo_collapsed__";
+function loadCollapsed(){ try{ const a=JSON.parse(localStorage.getItem(COLLAPSE_KEY)); if(Array.isArray(a)) state.collapsed=new Set(a); }catch(e){} }
+function saveCollapsed(){ try{ localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...state.collapsed])); }catch(e){} }
+/* ---- 並べ替え ---- */
+function moveInArray(arr,i,dir){ const j=i+dir; if(j<0||j>=arr.length)return false; const x=arr[i]; arr[i]=arr[j]; arr[j]=x; return true; }
+function moveGroup(name,dir){ const i=state.groups.findIndex(g=>g.name===name); if(i<0)return; if(moveInArray(state.groups,i,dir)){ markDirty(); renderAll(); } }
+function moveTagInGroup(gname,tag,dir){ const g=state.groups.find(x=>x.name===gname); if(!g)return; const i=g.tags.indexOf(tag); if(i<0)return; if(moveInArray(g.tags,i,dir)){ markDirty(); renderAll(); } }
+function ungroupedOrdered(){
+  const grouped=new Set(state.groups.flatMap(g=>g.tags));
+  const counts=new Map(allTags());
+  const arr=state.tagDefs.filter(t=>counts.has(t)&&!grouped.has(t));
+  [...counts.keys()].forEach(t=>{ if(!grouped.has(t)&&!arr.includes(t)) arr.push(t); });
+  return arr;
+}
+function moveUngroupedTag(tag,dir){
+  const arr=ungroupedOrdered(); const pos=arr.indexOf(tag); const np=pos+dir; if(np<0||np>=arr.length)return;
+  const other=arr[np]; const ia=state.tagDefs.indexOf(tag), ib=state.tagDefs.indexOf(other); if(ia<0||ib<0)return;
+  const x=state.tagDefs[ia]; state.tagDefs[ia]=state.tagDefs[ib]; state.tagDefs[ib]=x; markDirty(); renderAll();
+}
 
-function mkNav(label,{active=false,count="",onClick}={}){
-  const d=el("div","navitem"+(active?" active":""));
+function mkNav(label,{active=false,count="",onClick,sub=false}={}){
+  const d=el("div","navitem"+(active?" active":"")+(sub?" sub":""));
   const s=el("span"); s.textContent=label; d.appendChild(s);
   if(count!==""){ const c=el("span","cnt"); c.textContent=count; d.appendChild(c); }
   if(onClick) d.onclick=onClick;
+  return d;
+}
+function tagNav(t,count){
+  return mkNav((state.tags.has(t)?"☑ ":"☐ ")+"# "+t,{active:state.tags.has(t), count, sub:true,
+    onClick:()=>{ if(state.tags.has(t)) state.tags.delete(t); else state.tags.add(t); state.view="ALL"; renderAll(); }});
+}
+function groupHeader(name, key, count){
+  const collapsed=state.collapsed.has(key);
+  const d=el("div","navgroup");
+  d.textContent=(collapsed?"▸ ":"▾ ")+name+"（"+count+"）";
+  d.onclick=()=>{ if(collapsed) state.collapsed.delete(key); else state.collapsed.add(key); saveCollapsed(); renderSide(); };
   return d;
 }
 function renderSide(){
@@ -375,9 +421,26 @@ function renderSide(){
   const arcCount = state.notes.filter(n=>n.archived).length;
   side.appendChild(mkNav("🗒️ すべて",{active:state.view==="ALL"&&state.tags.size===0, count:activeCount,
     onClick:()=>{ state.view="ALL"; state.tags.clear(); renderAll(); }}));
-  const g2=el("div","grp"); g2.textContent="タグ（複数選択でAND絞り込み）"; side.appendChild(g2);
-  allTags().forEach(([t,c])=> side.appendChild(mkNav((state.tags.has(t)?"☑ ":"☐ ")+"# "+t,{active:state.tags.has(t), count:c,
-    onClick:()=>{ if(state.tags.has(t)) state.tags.delete(t); else state.tags.add(t); state.view="ALL"; renderAll(); }})));
+  const g2=el("div","grp"); g2.textContent="タグ（グループ／複数選択でAND）"; side.appendChild(g2);
+  const counts=new Map(allTags());
+  const names=[...counts.keys()];
+  const grouped=new Set();
+  state.groups.forEach(g=>{
+    const gtags=g.tags.filter(t=>counts.has(t));
+    if(!gtags.length) return;
+    side.appendChild(groupHeader(g.name, "g:"+g.name, gtags.length));
+    if(!state.collapsed.has("g:"+g.name)) gtags.forEach(t=>side.appendChild(tagNav(t, counts.get(t)||0)));
+    gtags.forEach(t=>grouped.add(t));
+  });
+  const others=ungroupedOrdered();
+  if(others.length){
+    if(state.groups.length){
+      side.appendChild(groupHeader("その他", "g:__other__", others.length));
+      if(!state.collapsed.has("g:__other__")) others.forEach(t=>side.appendChild(tagNav(t, counts.get(t)||0)));
+    }else{
+      others.forEach(t=>side.appendChild(tagNav(t, counts.get(t)||0)));
+    }
+  }
   if(state.tags.size>0){ side.appendChild(mkNav("✕ タグ選択をクリア",{onClick:()=>{ state.tags.clear(); renderAll(); }})); }
   const g3=el("div","grp"); g3.textContent=""; side.appendChild(g3);
   side.appendChild(mkNav("🗄️ アーカイブ",{active:state.view==="ARCHIVE", count:arcCount,
@@ -620,36 +683,71 @@ function addNoteFromCompose(){
    ============================================================ */
 function openTagManager(){
   const bg=el("div","modal-bg"); const m=el("div","modal");
+  const reopen=()=>{ bg.remove(); openTagManager(); };
+  const btn=(label,fn,dis)=>{ const b=el("button","mini"); b.textContent=label; if(dis){ b.disabled=true; } else b.onclick=fn; return b; };
   const h=el("h3"); h.textContent="タグ管理"; m.appendChild(h);
   // 新しいタグを作成（メモに付けなくても作れる）
   const crow=el("div","tagrow");
   const ci=el("input","taginput"); ci.placeholder="新しいタグ名"; ci.style.flex="1";
-  const cbtn=el("button","mini"); cbtn.textContent="＋ 作成";
-  const doCreate=()=>{ if(createTag(ci.value)){ bg.remove(); openTagManager(); } };
+  const cbtn=el("button","mini"); cbtn.textContent="＋ タグ作成";
+  const doCreate=()=>{ if(createTag(ci.value)){ reopen(); } };
   cbtn.onclick=doCreate; ci.onkeydown=e=>{ if(e.key==="Enter") doCreate(); };
   crow.appendChild(ci); crow.appendChild(cbtn); m.appendChild(crow);
-  // 一覧
-  const list=allTags();
-  if(!list.length){ const pp=el("p"); pp.style.cssText="color:#999;font-size:13px"; pp.textContent="タグはまだありません。上の欄で作成できます。"; m.appendChild(pp); }
-  list.forEach(([t,c])=>{
-    const row=el("div","tagrow"); const nm=el("span","nm"); nm.textContent="# "+t+"　("+c+"件)"; row.appendChild(nm);
-    const bR=el("button","mini"); bR.textContent="名前変更";
-    bR.onclick=()=>{ const nv=prompt("新しいタグ名", t); if(nv&&nv.trim()){ renameTag(t,nv.trim().replace(/^#/,"")); bg.remove(); openTagManager(); } };
-    const bD=el("button","mini"); bD.textContent="削除";
-    bD.onclick=()=>{ if(confirm(`タグ「${t}」を削除します（全メモから外し、一覧からも消えます）。よろしいですか？`)){ deleteTag(t); bg.remove(); openTagManager(); } };
-    row.appendChild(bR); row.appendChild(bD); m.appendChild(row);
+  // 新しいグループを作成
+  const grow=el("div","tagrow");
+  const gi=el("input","taginput"); gi.placeholder="新しいグループ名（例：価格帯）"; gi.style.flex="1";
+  const gbtn=el("button","mini"); gbtn.textContent="＋ グループ作成";
+  const doG=()=>{ if(createGroup(gi.value)){ reopen(); } };
+  gbtn.onclick=doG; gi.onkeydown=e=>{ if(e.key==="Enter") doG(); };
+  grow.appendChild(gi); grow.appendChild(gbtn); m.appendChild(grow);
+
+  const counts=new Map(allTags());
+  const tagRow=(t,c,ord)=>{
+    const row=el("div","tagrow");
+    row.appendChild(btn("▲",()=>{ ord.up(); reopen(); }, ord.upDis));
+    row.appendChild(btn("▼",()=>{ ord.down(); reopen(); }, ord.downDis));
+    const nm=el("span","nm"); nm.textContent="# "+t+"　("+c+")"; row.appendChild(nm);
+    const sel=el("select","mini");
+    const o0=el("option"); o0.value=""; o0.textContent="（その他）"; sel.appendChild(o0);
+    state.groups.forEach(g=>{ const o=el("option"); o.value=g.name; o.textContent=g.name; if(groupOf(t)===g.name) o.selected=true; sel.appendChild(o); });
+    sel.onchange=()=>{ setTagGroup(t, sel.value); reopen(); };
+    row.appendChild(sel);
+    row.appendChild(btn("改名",()=>{ const nv=prompt("新しいタグ名", t); if(nv&&nv.trim()){ renameTag(t,nv.trim().replace(/^#/,"")); reopen(); } }));
+    row.appendChild(btn("削除",()=>{ if(confirm(`タグ「${t}」を削除します（全メモから外し、一覧からも消えます）。よろしいですか？`)){ deleteTag(t); reopen(); } }));
+    return row;
+  };
+  // グループ（並べ替え・削除）とその配下タグ
+  state.groups.forEach((g,gi2)=>{
+    const gh=el("div","tagrow"); gh.style.background="#eef0f2";
+    gh.appendChild(btn("▲",()=>{ moveGroup(g.name,-1); reopen(); }, gi2===0));
+    gh.appendChild(btn("▼",()=>{ moveGroup(g.name,1); reopen(); }, gi2===state.groups.length-1));
+    const gn=el("span","nm"); gn.textContent="■ "+g.name; gn.style.fontWeight="700"; gh.appendChild(gn);
+    gh.appendChild(btn("グループ削除",()=>{ if(confirm(`グループ「${g.name}」を削除します（タグ自体は残ります）。`)){ deleteGroup(g.name); reopen(); } }));
+    m.appendChild(gh);
+    const gtags=g.tags.filter(t=>counts.has(t));
+    if(!gtags.length){ const e=el("div"); e.style.cssText="font-size:11px;color:#aaa;padding:2px 0 4px 42px;"; e.textContent="（タグ未割り当て）"; m.appendChild(e); }
+    gtags.forEach((t,ti)=> m.appendChild(tagRow(t, counts.get(t)||0, {up:()=>moveTagInGroup(g.name,t,-1), down:()=>moveTagInGroup(g.name,t,1), upDis:ti===0, downDis:ti===gtags.length-1})));
   });
+  // その他
+  const others=ungroupedOrdered();
+  if(others.length){
+    const oh=el("div","tagrow"); oh.style.background="#eef0f2"; const on=el("span","nm"); on.textContent="■ その他"; on.style.fontWeight="700"; oh.appendChild(on); m.appendChild(oh);
+    others.forEach((t,ti)=> m.appendChild(tagRow(t, counts.get(t)||0, {up:()=>moveUngroupedTag(t,-1), down:()=>moveUngroupedTag(t,1), upDis:ti===0, downDis:ti===others.length-1})));
+  }
+  if(!state.groups.length && !others.length){ const pp=el("p"); pp.style.cssText="color:#999;font-size:13px"; pp.textContent="タグはまだありません。上の欄で作成できます。"; m.appendChild(pp); }
   const cl=el("div","close"); const cb=el("button","mini"); cb.textContent="閉じる"; cb.onclick=()=>bg.remove(); cl.appendChild(cb); m.appendChild(cl);
   bg.appendChild(m); bg.onclick=e=>{ if(e.target===bg)bg.remove(); }; document.body.appendChild(bg);
 }
 function renameTag(from,to){
   state.tagDefs=[...new Set(state.tagDefs.map(t=>t===from?to:t))];
+  state.groups.forEach(g=>{ g.tags=[...new Set(g.tags.map(t=>t===from?to:t))]; });
   state.notes.forEach(n=>{ if(n.tags.includes(from)){ n.tags=[...new Set(n.tags.map(t=>t===from?to:t))]; n.updatedAt=nowISO(); } });
   if(state.tags.has(from)){ state.tags.delete(from); state.tags.add(to); }
   markDirty(); renderAll();
 }
 function deleteTag(t){
   state.tagDefs=state.tagDefs.filter(x=>x!==t);
+  state.groups.forEach(g=>{ g.tags=g.tags.filter(x=>x!==t); });
   state.notes.forEach(n=>{ if(n.tags.includes(t)){ n.tags=n.tags.filter(x=>x!==t); n.updatedAt=nowISO(); } });
   state.tags.delete(t);
   markDirty(); renderAll();
@@ -758,6 +856,7 @@ function bindEvents(){
 
 /* ---------- boot ---------- */
 $("#ver").textContent = APP_VERSION;
+loadCollapsed();
 bindEvents();
 initAuth();
 </script>

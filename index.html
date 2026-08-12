@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>メモ</title>
-<!-- メモ（Keep風）single-file app / version: v1.12 (2026-08-12) -->
-<meta name="app-version" content="v1.12 (2026-08-12)">
+<!-- メモ（Keep風）single-file app / version: v1.13 (2026-08-12) -->
+<meta name="app-version" content="v1.13 (2026-08-12)">
 <style>
   :root{
     --bg:#fafafa; --ink:#222; --sub:#666; --line:#dcdcdc; --line2:#c8c8c8;
@@ -126,6 +126,7 @@
   <select id="bookSel" class="hbtn" style="max-width:160px" title="メモ帳の切替"></select>
   <input id="search" placeholder="検索（キーワード・アーカイブも対象）">
   <button class="hbtn" id="sortBtn" title="並び順">並び：更新日順</button>
+  <button class="hbtn" id="mapBtn" title="表示中メモの住所をGoogleマップにまとめて表示">🗺 まとめ地図</button>
   <div class="spacer"></div>
   <span id="acct"></span>
   <button class="hbtn" id="menuBtn">メニュー ▾</button>
@@ -165,7 +166,7 @@
 /* ============================================================
    メモ（Keep風）— 単一HTML / Googleドライブ保存(drive.file)
    ============================================================ */
-const APP_VERSION = "v1.12 (2026-08-12)";
+const APP_VERSION = "v1.13 (2026-08-12)";
 const CONFIG = {
   CLIENT_ID: "162155904085-ud13pisfjodgim2t19q9n2us70ekc9n4.apps.googleusercontent.com",
   SCOPE: "https://www.googleapis.com/auth/drive.file",
@@ -856,6 +857,19 @@ function setupComposeAttach(){
 function refreshTagOptions(){ const dl=$("#tagOptions"); if(!dl)return; dl.innerHTML=""; allTags().forEach(([t])=>{ const o=el("option"); o.value=t; dl.appendChild(o); }); }
 function renderAll(){ renderSide(); renderGrid(); refreshTagOptions(); }
 
+/* ---------- 表示中メモの住所をGoogleマップにまとめて開く ---------- */
+function openMapForVisible(){
+  const addrs=[];
+  visibleNotes().forEach(n=>{ const a=extractAddress(n.text); if(a && !addrs.includes(a)) addrs.push(a); });
+  if(!addrs.length){ toast("表示中のメモに『住所：…』が見つかりません"); return; }
+  let use=addrs;
+  if(addrs.length>10){ use=addrs.slice(0,10); toast(`地点が多いため先頭10件を表示（${addrs.length}件中）`); }
+  const url = use.length===1
+    ? "https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(use[0])
+    : "https://www.google.com/maps/dir/"+use.map(a=>encodeURIComponent(a)).join("/");
+  window.open(url, "_blank");
+}
+
 /* ---------- メモ帳（複数） ---------- */
 function renderBookSelector(){
   const sel=$("#bookSel"); if(!sel) return; sel.innerHTML="";
@@ -892,6 +906,7 @@ function bindEvents(){
     $("#sortBtn").textContent = "並び："+(state.sort==="updated"?"更新日順":"手動並び順"); renderGrid(); };
   $("#menuBtn").onclick=openMenu;
   $("#bookSel").onchange=()=>{ const v=$("#bookSel").value; if(v==="__new__"){ createBook(); } else if(v!==state.book){ switchBook(v); } };
+  $("#mapBtn").onclick=openMapForVisible;
   const cText=$("#cText");
   cText.addEventListener("input",()=>autoGrow(cText));
   cText.addEventListener("keydown",e=>{ if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){ addNoteFromCompose(); } });

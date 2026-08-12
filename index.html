@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>メモ</title>
-<!-- メモ（Keep風）single-file app / version: v1.11 (2026-08-12) -->
-<meta name="app-version" content="v1.11 (2026-08-12)">
+<!-- メモ（Keep風）single-file app / version: v1.12 (2026-08-12) -->
+<meta name="app-version" content="v1.12 (2026-08-12)">
 <style>
   :root{
     --bg:#fafafa; --ink:#222; --sub:#666; --line:#dcdcdc; --line2:#c8c8c8;
@@ -123,6 +123,7 @@
 <header>
   <span class="title">メモ</span>
   <span class="ver" id="ver"></span>
+  <select id="bookSel" class="hbtn" style="max-width:160px" title="メモ帳の切替"></select>
   <input id="search" placeholder="検索（キーワード・アーカイブも対象）">
   <button class="hbtn" id="sortBtn" title="並び順">並び：更新日順</button>
   <div class="spacer"></div>
@@ -164,7 +165,7 @@
 /* ============================================================
    メモ（Keep風）— 単一HTML / Googleドライブ保存(drive.file)
    ============================================================ */
-const APP_VERSION = "v1.11 (2026-08-12)";
+const APP_VERSION = "v1.12 (2026-08-12)";
 const CONFIG = {
   CLIENT_ID: "162155904085-ud13pisfjodgim2t19q9n2us70ekc9n4.apps.googleusercontent.com",
   SCOPE: "https://www.googleapis.com/auth/drive.file",
@@ -188,6 +189,8 @@ const MOCK = new URLSearchParams(location.search).has("mock");
 /* ---------- state ---------- */
 let state = {
   notes: [],
+  book: new URLSearchParams(location.search).get("book") || "",  // メモ帳キー（""＝既定）
+  books: [],           // メモ帳一覧 [{key,name}]
   tagDefs: [],         // マスタータグ一覧（メモ未使用でも保持）
   groups: [],          // タググループ [{name, tags:[...]}]
   collapsed: new Set(),// 折りたたみ中のグループ名
@@ -205,6 +208,7 @@ const $  = s => document.querySelector(s);
 const el = (t,c)=>{const e=document.createElement(t); if(c)e.className=c; return e;};
 const uid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 const nowISO = () => new Date().toISOString();
+function notesFileName(){ return state.book ? ("notes-"+state.book+".json") : "notes.json"; }
 const esc = s => (s||"").replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));
 function fmtDate(iso){ if(!iso) return ""; const d=new Date(iso); const p=n=>String(n).padStart(2,"0");
   return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
@@ -236,19 +240,20 @@ const DriveStore = {
       body:JSON.stringify({name:CONFIG.FOLDER_NAME, mimeType:"application/vnd.google-apps.folder"})});
     j = await r.json(); folderId = j.id; return folderId;
   },
-  async load(){
+  async findFile(name){
     await this.ensureFolder();
-    const q = encodeURIComponent(`name='${CONFIG.NOTES_FILE}' and '${folderId}' in parents and trashed=false`);
+    const q = encodeURIComponent(`name='${name}' and '${folderId}' in parents and trashed=false`);
     const r = await this.api("drive/v3/files?q="+q+"&fields=files(id,name)");
     const j = await r.json();
-    if(j.files && j.files.length){
-      notesFileId = j.files[0].id;
-      const rc = await this.api("drive/v3/files/"+notesFileId+"?alt=media");
-      const data = await rc.json();
-      return data;
-    }
-    return {version:1, notes:[]};
+    return (j.files && j.files[0]) ? j.files[0].id : null;
   },
+  async readJson(name){
+    const id = await this.findFile(name); if(!id) return null;
+    const rc = await this.api("drive/v3/files/"+id+"?alt=media");
+    return await rc.json();
+  },
+  async load(){ const d = await this.readJson(notesFileName()); return d || {version:1, notes:[]}; },
+  async loadBooks(){ return await this.readJson("books.json"); },
   _multipart(metadata, blob){
     const boundary = "memoBoundary"+Math.random().toString(36).slice(2);
     const head = "--"+boundary+"\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n"+JSON.stringify(metadata)
@@ -257,17 +262,16 @@ const DriveStore = {
     const body = new Blob([head, blob, tail], {type:"multipart/related; boundary="+boundary});
     return {body, ct:"multipart/related; boundary="+boundary};
   },
-  async save(data){
-    await this.ensureFolder();
-    const meta = {name:CONFIG.NOTES_FILE, mimeType:"application/json"};
-    if(!notesFileId) meta.parents=[folderId];
+  async writeJson(name, data){
+    const id = await this.findFile(name);
+    const meta = {name, mimeType:"application/json"}; if(!id) meta.parents=[folderId];
     const blob = new Blob([JSON.stringify(data)], {type:"application/json"});
     const {body, ct} = this._multipart(meta, blob);
-    const method = notesFileId ? "PATCH" : "POST";
-    const url = "upload/drive/v3/files"+(notesFileId?("/"+notesFileId):"")+"?uploadType=multipart&fields=id";
-    const r = await this.api(url, {method, headers:{"Content-Type":ct}, body});
-    const j = await r.json(); if(j.id) notesFileId=j.id;
+    const url = "upload/drive/v3/files"+(id?("/"+id):"")+"?uploadType=multipart&fields=id";
+    await this.api(url, {method:id?"PATCH":"POST", headers:{"Content-Type":ct}, body});
   },
+  async save(data){ await this.writeJson(notesFileName(), data); },
+  async saveBooks(b){ await this.writeJson("books.json", {books:b}); },
   async uploadAttachment(file){
     await this.ensureFolder();
     const meta = {name:file.name, parents:[folderId]};
@@ -287,9 +291,11 @@ const DriveStore = {
 };
 
 const MockStore = {
-  _key:"__memo_mock__",
-  async load(){ try{ return JSON.parse(localStorage.getItem(this._key)) || {version:1,notes:[]}; }catch(e){ return {version:1,notes:[]}; } },
-  async save(data){ try{ localStorage.setItem(this._key, JSON.stringify(data)); }catch(e){} },
+  dkey(){ return "__memo_mock_"+(state.book||"main"); },
+  async load(){ try{ return JSON.parse(localStorage.getItem(this.dkey())) || {version:1,notes:[]}; }catch(e){ return {version:1,notes:[]}; } },
+  async save(data){ try{ localStorage.setItem(this.dkey(), JSON.stringify(data)); }catch(e){} },
+  async loadBooks(){ try{ return JSON.parse(localStorage.getItem("__memo_mock_books__")); }catch(e){ return null; } },
+  async saveBooks(b){ try{ localStorage.setItem("__memo_mock_books__", JSON.stringify({books:b})); }catch(e){} },
   async uploadAttachment(file){
     const url = await new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.readAsDataURL(file); });
     return {id:uid("a_"), name:file.name, type:file.type||"application/octet-stream", size:file.size, _dataUrl:url};
@@ -336,12 +342,19 @@ function initAuth(){
 }
 async function afterAuth(){
   try{
+    // メモ帳一覧（books.json）
+    let breg = await store.loadBooks();
+    if(!breg || !Array.isArray(breg.books) || !breg.books.length){ breg={books:[{key:"", name:"メモ"}]}; await store.saveBooks(breg.books); }
+    state.books = breg.books;
+    if(state.book && !state.books.find(b=>b.key===state.book)){ state.books.push({key:state.book, name:state.book}); await store.saveBooks(state.books); }
+    // 現在のメモ帳のデータ
     const data = await store.load();
     state.notes = (data.notes||[]).map(normalize);
     state.tagDefs = [...new Set([...(data.tagDefs||[]), ...state.notes.flatMap(n=>n.tags)])];
     state.groups = Array.isArray(data.tagGroups) ? data.tagGroups.map(g=>({name:g.name, tags:Array.isArray(g.tags)?g.tags:[]})) : [];
     $("#overlay").style.display="none";
     $("#acct").textContent = MOCK ? "（モック）" : "接続済み";
+    renderBookSelector();
     renderAll();
     setTimeout(()=>$("#cText").focus(), 60);
   }catch(e){
@@ -760,6 +773,8 @@ function openMenu(e){
   closePops();
   const pop=el("div","pop"); pop.style.right="14px"; pop.style.top="48px"; pop.style.position="fixed";
   const mk=(label,fn)=>{ const b=el("div","navitem"); b.textContent=label; b.onclick=()=>{ closePops(); fn(); }; pop.appendChild(b); };
+  mk("✎ このメモ帳の名前を変更", renameBook);
+  mk("🗑 このメモ帳を削除", deleteBook);
   mk("⬇️ 書き出し（バックアップ）", exportData);
   mk("⬆️ 読み込み（復元）", importData);
   mk("💾 今すぐ保存", ()=>{ dirty=true; flush(); });
@@ -841,11 +856,42 @@ function setupComposeAttach(){
 function refreshTagOptions(){ const dl=$("#tagOptions"); if(!dl)return; dl.innerHTML=""; allTags().forEach(([t])=>{ const o=el("option"); o.value=t; dl.appendChild(o); }); }
 function renderAll(){ renderSide(); renderGrid(); refreshTagOptions(); }
 
+/* ---------- メモ帳（複数） ---------- */
+function renderBookSelector(){
+  const sel=$("#bookSel"); if(!sel) return; sel.innerHTML="";
+  (state.books||[]).forEach(b=>{ const o=el("option"); o.value=b.key; o.textContent=b.name; if(b.key===state.book)o.selected=true; sel.appendChild(o); });
+  const on=el("option"); on.value="__new__"; on.textContent="＋ 新規メモ帳…"; sel.appendChild(on);
+}
+async function switchBook(key){
+  if(dirty){ try{ await flush(); }catch(e){} }
+  const u=new URL(location.href); if(key) u.searchParams.set("book",key); else u.searchParams.delete("book"); location.href=u.toString();
+}
+async function createBook(){
+  const name=prompt("新しいメモ帳の名前（例：備忘メモ）"); if(!name||!name.trim()){ renderBookSelector(); return; }
+  const key="b"+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+  state.books.push({key, name:name.trim()});
+  try{ await store.saveBooks(state.books); }catch(e){}
+  switchBook(key);
+}
+async function renameBook(){
+  const b=state.books.find(x=>x.key===state.book); if(!b) return;
+  const nv=prompt("メモ帳の名前", b.name); if(nv&&nv.trim()){ b.name=nv.trim(); try{ await store.saveBooks(state.books); }catch(e){} renderBookSelector(); toast("名前を変更しました"); }
+}
+async function deleteBook(){
+  if(!state.book){ alert("最初のメモ帳は削除できません。"); return; }
+  const b=state.books.find(x=>x.key===state.book);
+  if(!confirm(`メモ帳「${b?b.name:state.book}」を一覧から削除します。中のメモは表示されなくなります。よろしいですか？`)) return;
+  state.books=state.books.filter(x=>x.key!==state.book);
+  try{ await store.saveBooks(state.books); }catch(e){}
+  switchBook("");
+}
+
 function bindEvents(){
   $("#search").addEventListener("input",e=>{ state.q=e.target.value; renderGrid(); });
   $("#sortBtn").onclick=()=>{ state.sort = state.sort==="updated"?"manual":"updated";
     $("#sortBtn").textContent = "並び："+(state.sort==="updated"?"更新日順":"手動並び順"); renderGrid(); };
   $("#menuBtn").onclick=openMenu;
+  $("#bookSel").onchange=()=>{ const v=$("#bookSel").value; if(v==="__new__"){ createBook(); } else if(v!==state.book){ switchBook(v); } };
   const cText=$("#cText");
   cText.addEventListener("input",()=>autoGrow(cText));
   cText.addEventListener("keydown",e=>{ if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){ addNoteFromCompose(); } });

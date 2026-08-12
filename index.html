@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>メモ</title>
-<!-- メモ（Keep風）single-file app / version: v1.16 (2026-08-12) -->
-<meta name="app-version" content="v1.16 (2026-08-12)">
+<!-- メモ（Keep風）single-file app / version: v1.17 (2026-08-12) -->
+<meta name="app-version" content="v1.17 (2026-08-12)">
 <style>
   :root{
     --bg:#fafafa; --ink:#222; --sub:#666; --line:#dcdcdc; --line2:#c8c8c8;
@@ -35,6 +35,12 @@
   .navitem:hover{ background:#eee; }
   .navitem.active{ background:#e6edf5; color:#123; font-weight:600; }
   .navitem.sub{ padding-left:20px; }
+  .navitem.tagrow2{ padding-left:8px; gap:4px; }
+  .cbcell{ width:18px; display:inline-flex; justify-content:center; flex:none; }
+  .cbcell.h{ font-weight:700; color:#888; font-size:10px; }
+  .tck{ margin:0; cursor:pointer; }
+  .tlbl{ cursor:pointer; }
+  .taghead{ display:flex; align-items:center; gap:4px; padding:0 8px 4px; font-size:10px; color:#999; }
   .navitem .cnt{ margin-left:auto; font-size:11px; color:#999; }
   .navgroup{ font-size:11.5px; color:#555; cursor:pointer; padding:5px 8px; margin-top:3px; font-weight:600; user-select:none; }
   .navgroup:hover{ background:#eee; border-radius:6px; }
@@ -169,7 +175,7 @@
 /* ============================================================
    メモ（Keep風）— 単一HTML / Googleドライブ保存(drive.file)
    ============================================================ */
-const APP_VERSION = "v1.16 (2026-08-12)";
+const APP_VERSION = "v1.17 (2026-08-12)";
 const CONFIG = {
   CLIENT_ID: "162155904085-ud13pisfjodgim2t19q9n2us70ekc9n4.apps.googleusercontent.com",
   SCOPE: "https://www.googleapis.com/auth/drive.file",
@@ -199,7 +205,8 @@ let state = {
   groups: [],          // タググループ [{name, tags:[...]}]
   collapsed: new Set(),// 折りたたみ中のグループ名
   view: "ALL",         // ALL | ARCHIVE
-  tags: new Set(),     // 選択中のタグ（複数選択でAND絞り込み）
+  orTags: new Set(),   // 「いずれか(OR)」列で選択中のタグ
+  andTags: new Set(),  // 「必須(AND)」列で選択中のタグ
   q: "",
   sort: "updated",     // updated | manual
   composeColor: "none",
@@ -421,9 +428,20 @@ function mkNav(label,{active=false,count="",onClick,sub=false}={}){
   if(onClick) d.onclick=onClick;
   return d;
 }
+function clearTagSel(){ state.orTags.clear(); state.andTags.clear(); }
+function anyTagSel(){ return state.orTags.size>0 || state.andTags.size>0; }
 function tagNav(t,count){
-  return mkNav((state.tags.has(t)?"☑ ":"☐ ")+"# "+t,{active:state.tags.has(t), count, sub:true,
-    onClick:()=>{ if(state.tags.has(t)) state.tags.delete(t); else state.tags.add(t); state.view="ALL"; renderAll(); }});
+  const on = state.orTags.has(t) || state.andTags.has(t);
+  const d=el("div","navitem tagrow2"+(on?" active":""));
+  const orCell=el("span","cbcell"); const orC=el("input"); orC.type="checkbox"; orC.className="tck"; orC.title="いずれか(OR)"; orC.checked=state.orTags.has(t); orCell.appendChild(orC);
+  const andCell=el("span","cbcell"); const andC=el("input"); andC.type="checkbox"; andC.className="tck"; andC.title="必須(AND)"; andC.checked=state.andTags.has(t); andCell.appendChild(andC);
+  orC.onclick=(e)=>{ e.stopPropagation(); if(orC.checked){ state.orTags.add(t); state.andTags.delete(t); } else state.orTags.delete(t); state.view="ALL"; renderAll(); };
+  andC.onclick=(e)=>{ e.stopPropagation(); if(andC.checked){ state.andTags.add(t); state.orTags.delete(t); } else state.andTags.delete(t); state.view="ALL"; renderAll(); };
+  const lbl=el("span","tlbl"); lbl.textContent="# "+t;
+  lbl.onclick=()=>{ if(state.orTags.has(t)){ state.orTags.delete(t); } else { state.orTags.add(t); state.andTags.delete(t); } state.view="ALL"; renderAll(); };
+  const cnt=el("span","cnt"); cnt.textContent=count;
+  d.appendChild(orCell); d.appendChild(andCell); d.appendChild(lbl); d.appendChild(cnt);
+  return d;
 }
 function groupHeader(name, key, count){
   const collapsed=state.collapsed.has(key);
@@ -437,9 +455,10 @@ function renderSide(){
   const g1=el("div","grp"); g1.textContent="表示"; side.appendChild(g1);
   const activeCount = state.notes.filter(n=>!n.archived).length;
   const arcCount = state.notes.filter(n=>n.archived).length;
-  side.appendChild(mkNav("🗒️ すべて",{active:state.view==="ALL"&&state.tags.size===0, count:activeCount,
-    onClick:()=>{ state.view="ALL"; state.tags.clear(); renderAll(); }}));
-  const g2=el("div","grp"); g2.textContent="タグ（グループ／複数選択でAND）"; side.appendChild(g2);
+  side.appendChild(mkNav("🗒️ すべて",{active:state.view==="ALL"&&!anyTagSel(), count:activeCount,
+    onClick:()=>{ state.view="ALL"; clearTagSel(); renderAll(); }}));
+  const g2=el("div","grp"); g2.textContent="タグ（或＝いずれか / 必＝必須）"; side.appendChild(g2);
+  const th=el("div","taghead"); th.innerHTML="<span class='cbcell h'>或</span><span class='cbcell h'>必</span><span>タグ／件数</span>"; side.appendChild(th);
   const counts=new Map(allTags());
   const names=[...counts.keys()];
   const grouped=new Set();
@@ -459,24 +478,29 @@ function renderSide(){
       others.forEach(t=>side.appendChild(tagNav(t, counts.get(t)||0)));
     }
   }
-  if(state.tags.size>0){ side.appendChild(mkNav("✕ タグ選択をクリア",{onClick:()=>{ state.tags.clear(); renderAll(); }})); }
+  if(anyTagSel()){ side.appendChild(mkNav("✕ タグ選択をクリア",{onClick:()=>{ clearTagSel(); renderAll(); }})); }
   const g3=el("div","grp"); g3.textContent=""; side.appendChild(g3);
   side.appendChild(mkNav("🗄️ アーカイブ",{active:state.view==="ARCHIVE", count:arcCount,
-    onClick:()=>{ state.view="ARCHIVE"; state.tags.clear(); renderAll(); }}));
+    onClick:()=>{ state.view="ARCHIVE"; clearTagSel(); renderAll(); }}));
   side.appendChild(mkNav("⚙️ タグ管理",{onClick:openTagManager}));
 }
 
 function visibleNotes(){
   const q=state.q.trim().toLowerCase();
-  const tags=[...state.tags];
+  const orT=[...state.orTags], andT=[...state.andTags];
+  const applyTags=(l)=>{
+    if(orT.length) l=l.filter(n=> orT.some(t=>n.tags.includes(t)));
+    if(andT.length) l=l.filter(n=> andT.every(t=>n.tags.includes(t)));
+    return l;
+  };
   let list=state.notes.slice();
   if(q){
     // 検索時はアーカイブも対象
     list=list.filter(n=> n.text.toLowerCase().includes(q) || n.tags.some(t=>t.toLowerCase().includes(q)) );
-    if(tags.length) list=list.filter(n=> tags.every(t=>n.tags.includes(t)));
+    list=applyTags(list);
   }else{
     if(state.view==="ARCHIVE") list=list.filter(n=>n.archived);
-    else if(tags.length) list=list.filter(n=> tags.every(t=>n.tags.includes(t))); // タグ絞り込みはアーカイブも含む
+    else if(anyTagSel()) list=applyTags(list); // タグ絞り込みはアーカイブも含む
     else list=list.filter(n=>!n.archived);
   }
   if(state.sort==="updated") list.sort((a,b)=> (b.updatedAt||"").localeCompare(a.updatedAt||""));
@@ -760,14 +784,14 @@ function renameTag(from,to){
   state.tagDefs=[...new Set(state.tagDefs.map(t=>t===from?to:t))];
   state.groups.forEach(g=>{ g.tags=[...new Set(g.tags.map(t=>t===from?to:t))]; });
   state.notes.forEach(n=>{ if(n.tags.includes(from)){ n.tags=[...new Set(n.tags.map(t=>t===from?to:t))]; n.updatedAt=nowISO(); } });
-  if(state.tags.has(from)){ state.tags.delete(from); state.tags.add(to); }
+  ["orTags","andTags"].forEach(k=>{ if(state[k].has(from)){ state[k].delete(from); state[k].add(to); } });
   markDirty(); renderAll();
 }
 function deleteTag(t){
   state.tagDefs=state.tagDefs.filter(x=>x!==t);
   state.groups.forEach(g=>{ g.tags=g.tags.filter(x=>x!==t); });
   state.notes.forEach(n=>{ if(n.tags.includes(t)){ n.tags=n.tags.filter(x=>x!==t); n.updatedAt=nowISO(); } });
-  state.tags.delete(t);
+  state.orTags.delete(t); state.andTags.delete(t);
   markDirty(); renderAll();
 }
 

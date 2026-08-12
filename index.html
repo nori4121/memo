@@ -37,6 +37,8 @@
   /* ---- compose ---- */
   .compose{ max-width:600px; margin:0 auto 20px; background:#fff; border:1px solid var(--line2); border-radius:10px; box-shadow:0 1px 3px rgba(0,0,0,.06); padding:10px 12px; }
   .compose textarea{ width:100%; border:0; resize:none; font:inherit; font-size:14px; outline:none; min-height:24px; background:transparent; }
+  .compose.dropover{ outline:2px dashed var(--accent); outline-offset:2px; }
+  .card.fileover{ outline:2px dashed var(--accent); }
   .compose .row{ display:flex; align-items:center; gap:8px; margin-top:6px; }
   .taginput{ border:1px dashed var(--line2); border-radius:6px; padding:3px 8px; font:inherit; font-size:12px; width:130px; }
   .mini{ border:1px solid var(--line2); background:#fff; border-radius:6px; padding:4px 9px; font-size:12px; cursor:pointer; }
@@ -111,8 +113,9 @@
 <div class="main">
   <aside id="side"></aside>
   <div class="content">
-    <div class="compose">
-      <textarea id="cText" rows="1" placeholder="メモを入力…（1行目が見出し）"></textarea>
+    <div class="compose" id="compose">
+      <textarea id="cText" rows="1" placeholder="メモを入力…（1行目が見出し／画像はCtrl+V・ファイルはドラッグ＆ドロップ）"></textarea>
+      <div class="atts" id="cPending" style="margin:6px 0"></div>
       <div class="row">
         <input class="taginput" id="cTag" placeholder="#タグ 追加（Enter）">
         <button class="mini" id="cAttach">📎 添付</button>
@@ -446,9 +449,14 @@ function setupDrag(card,n,handle){
   handle.addEventListener("mouseup",()=>{ card.draggable=false; });
   card.addEventListener("dragstart",e=>{ if(state.sort!=="manual"){ e.preventDefault(); toast("『手動並び順』のときだけ並べ替えできます"); return; } dragId=n.id; card.classList.add("drag"); });
   card.addEventListener("dragend",()=>{ card.classList.remove("drag"); card.draggable=false; document.querySelectorAll(".card.over").forEach(x=>x.classList.remove("over")); });
-  card.addEventListener("dragover",e=>{ if(dragId&&dragId!==n.id){ e.preventDefault(); card.classList.add("over"); } });
-  card.addEventListener("dragleave",()=>card.classList.remove("over"));
-  card.addEventListener("drop",e=>{ e.preventDefault(); card.classList.remove("over"); if(!dragId||dragId===n.id)return; reorder(dragId,n.id); dragId=null; });
+  card.addEventListener("dragover",e=>{ const isFile=[...(e.dataTransfer.types||[])].includes("Files");
+    if(isFile){ e.preventDefault(); card.classList.add("fileover"); return; }
+    if(dragId&&dragId!==n.id){ e.preventDefault(); card.classList.add("over"); } });
+  card.addEventListener("dragleave",()=>{ card.classList.remove("over"); card.classList.remove("fileover"); });
+  card.addEventListener("drop",e=>{
+    if(e.dataTransfer.files&&e.dataTransfer.files.length){ e.preventDefault(); card.classList.remove("fileover");
+      addAttachments(n,[...e.dataTransfer.files], card.querySelector(".atts")); toast("カードに添付しました"); return; }
+    e.preventDefault(); card.classList.remove("over"); if(!dragId||dragId===n.id)return; reorder(dragId,n.id); dragId=null; });
 }
 function reorder(fromId,toId){
   const list=visibleNotes();
@@ -500,7 +508,7 @@ function addNoteFromCompose(){
   state.notes.push(n);
   // reset
   $("#cText").value=""; $("#cTag").value=""; state.composeColor="none"; state.composeAtts=[];
-  autoGrow($("#cText")); renderComposeDots();
+  autoGrow($("#cText")); renderComposeDots(); renderComposePending();
   markDirty(); renderAll(); $("#cText").focus();
 }
 
@@ -566,17 +574,46 @@ function importData(){
 /* ---------- file picker / paste / drop ---------- */
 function pickFiles(cb, accept){ const inp=el("input"); inp.type="file"; inp.multiple=true; if(accept)inp.accept=accept; inp.onchange=()=>cb([...inp.files]); inp.click(); }
 
+async function renderComposePending(){
+  const box=$("#cPending"); if(!box) return; box.innerHTML="";
+  for(const a of state.composeAtts){
+    if((a.type||"").startsWith("image/")){
+      const wrap=el("span","att-img-wrap"); const img=el("img","att-img");
+      try{ img.src=await store.attUrl(a); }catch(e){}
+      img.onclick=()=>window.open(img.src,"_blank");
+      const rm=el("span","rm"); rm.textContent="×"; rm.title="削除";
+      rm.onclick=()=>{ state.composeAtts=state.composeAtts.filter(x=>x!==a); if(!MOCK&&a.driveFileId)store.deleteAttachment(a); renderComposePending(); };
+      wrap.appendChild(img); wrap.appendChild(rm); box.appendChild(wrap);
+    }else{
+      const f=el("span","att-file"); f.innerHTML="📎 "+esc(a.name)+" <small>("+fmtSize(a.size)+")</small> <span class='rm'>×</span>";
+      f.querySelector(".rm").onclick=()=>{ state.composeAtts=state.composeAtts.filter(x=>x!==a); if(!MOCK&&a.driveFileId)store.deleteAttachment(a); renderComposePending(); };
+      box.appendChild(f);
+    }
+  }
+}
+async function addComposeFiles(files){
+  let added=0;
+  for(const file of files){
+    if(file.size>CONFIG.MAX_ATT_MB*1048576){ toast(`${file.name} は${CONFIG.MAX_ATT_MB}MB超`); continue; }
+    try{ const att=await store.uploadAttachment(file); state.composeAtts.push(att); added++; }catch(e){ toast("添付の保存に失敗"); }
+  }
+  if(added) renderComposePending();
+  return added;
+}
 function setupComposeAttach(){
-  $("#cAttach").onclick=()=>pickFiles(async files=>{
-    for(const file of files){ if(file.size>CONFIG.MAX_ATT_MB*1048576){ toast(`${file.name} は${CONFIG.MAX_ATT_MB}MB超`); continue; }
-      const att=await store.uploadAttachment(file); state.composeAtts.push(att); }
-    toast(state.composeAtts.length+" 件添付（追加で確定）");
-  });
+  $("#cAttach").onclick=()=>pickFiles(files=>addComposeFiles(files));
   const cText=$("#cText");
   cText.addEventListener("paste", async e=>{
-    const items=[...(e.clipboardData?.items||[])];
-    for(const it of items){ if(it.type.startsWith("image/")){ const file=it.getAsFile(); if(file){ const att=await store.uploadAttachment(file); state.composeAtts.push(att); toast("画像を添付（追加で確定）"); } } }
+    const files=[];
+    for(const it of [...(e.clipboardData?.items||[])]){ if(it.type.startsWith("image/")){ const f=it.getAsFile(); if(f) files.push(f); } }
+    if(files.length){ e.preventDefault(); await addComposeFiles(files); toast("画像を添付しました"); }
   });
+  // ドラッグ＆ドロップ（新規メモへ）
+  const comp=$("#compose");
+  comp.addEventListener("dragover",e=>{ if([...(e.dataTransfer.types||[])].includes("Files")){ e.preventDefault(); comp.classList.add("dropover"); } });
+  comp.addEventListener("dragleave",e=>{ if(!comp.contains(e.relatedTarget)) comp.classList.remove("dropover"); });
+  comp.addEventListener("drop",e=>{ if(e.dataTransfer.files&&e.dataTransfer.files.length){ e.preventDefault(); comp.classList.remove("dropover"); addComposeFiles([...e.dataTransfer.files]); } });
+  renderComposePending();
 }
 
 /* ============================================================

@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>メモ</title>
-<!-- メモ（Keep風）single-file app / version: v1.14 (2026-08-12) -->
-<meta name="app-version" content="v1.14 (2026-08-12)">
+<!-- メモ（Keep風）single-file app / version: v1.16 (2026-08-12) -->
+<meta name="app-version" content="v1.16 (2026-08-12)">
 <style>
   :root{
     --bg:#fafafa; --ink:#222; --sub:#666; --line:#dcdcdc; --line2:#c8c8c8;
@@ -130,7 +130,6 @@
   <select id="bookSel" class="hbtn" style="max-width:160px" title="メモ帳の切替"></select>
   <input id="search" placeholder="検索（キーワード・アーカイブも対象）">
   <button class="hbtn" id="sortBtn" title="並び順">並び：更新日順</button>
-  <button class="hbtn" id="mapBtn" title="表示中メモの住所をGoogleマップにまとめて表示">🗺 まとめ地図</button>
   <div class="spacer"></div>
   <span id="acct"></span>
   <button class="hbtn" id="menuBtn">メニュー ▾</button>
@@ -170,7 +169,7 @@
 /* ============================================================
    メモ（Keep風）— 単一HTML / Googleドライブ保存(drive.file)
    ============================================================ */
-const APP_VERSION = "v1.14 (2026-08-12)";
+const APP_VERSION = "v1.16 (2026-08-12)";
 const CONFIG = {
   CLIENT_ID: "162155904085-ud13pisfjodgim2t19q9n2us70ekc9n4.apps.googleusercontent.com",
   SCOPE: "https://www.googleapis.com/auth/drive.file",
@@ -775,10 +774,33 @@ function deleteTag(t){
 /* ============================================================
    menu: export / import
    ============================================================ */
+/* ---------- CSV書き出し（Googleマイマップ取込用） ---------- */
+function csvEscape(s){ s=(s==null?"":String(s)); return '"'+s.replace(/"/g,'""')+'"'; }
+function exportMapCsv(){
+  const notes=visibleNotes().filter(n=>extractAddress(n.text));
+  if(!notes.length){ toast("表示中に『住所：…』付きのメモがありません"); return; }
+  const header=["名前","住所","タグ","食べログ","動画","メモ"];
+  const rows=notes.map(n=>{
+    const title=(n.text.split("\n")[0]||"").trim();
+    const addr=extractAddress(n.text);
+    const urls=n.text.match(/https?:\/\/[^\s<>"'）】」]+/g)||[];
+    const tabelog=urls.find(u=>/tabelog\.com/.test(u))||"";
+    const yt=urls.find(u=>/youtu\.?be|youtube\.com/.test(u))||"";
+    const memo=n.text.replace(/\s*\n\s*/g," / ").trim();
+    return [title, addr, (n.tags||[]).join(" "), tabelog, yt, memo];
+  });
+  const csv="﻿"+[header,...rows].map(r=>r.map(csvEscape).join(",")).join("\r\n");
+  const bookName=((state.books||[]).find(b=>b.key===state.book)||{}).name||"メモ";
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
+  a.download="memo-map-"+bookName+".csv"; a.click();
+  toast(notes.length+"件をCSV書き出ししました（マイマップにインポート）");
+}
+
 function openMenu(e){
   closePops();
   const pop=el("div","pop"); pop.style.right="14px"; pop.style.top="48px"; pop.style.position="fixed";
   const mk=(label,fn)=>{ const b=el("div","navitem"); b.textContent=label; b.onclick=()=>{ closePops(); fn(); }; pop.appendChild(b); };
+  mk("🗺 CSV書き出し（マイマップ用）", exportMapCsv);
   mk("✎ このメモ帳の名前を変更", renameBook);
   mk("🗑 このメモ帳を削除", deleteBook);
   mk("⬇️ 書き出し（バックアップ）", exportData);
@@ -862,62 +884,6 @@ function setupComposeAttach(){
 function refreshTagOptions(){ const dl=$("#tagOptions"); if(!dl)return; dl.innerHTML=""; allTags().forEach(([t])=>{ const o=el("option"); o.value=t; dl.appendChild(o); }); }
 function renderAll(){ renderSide(); renderGrid(); refreshTagOptions(); }
 
-/* ---------- 表示中メモの住所を、アプリ内地図にピン表示（OSM/Leaflet + Nominatim） ---------- */
-const sleep = ms => new Promise(r=>setTimeout(r, ms));
-const geoCache = new Map();
-function loadLeaflet(){
-  return new Promise((res,rej)=>{
-    if(window.L) return res();
-    const css=document.createElement("link"); css.rel="stylesheet"; css.href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"; document.head.appendChild(css);
-    const s=document.createElement("script"); s.src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"; s.onload=()=>res(); s.onerror=()=>rej(new Error("leaflet")); document.head.appendChild(s);
-  });
-}
-async function geocodeAddr(addr){
-  if(geoCache.has(addr)) return geoCache.get(addr);
-  const url="https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=jp&q="+encodeURIComponent(addr);
-  const r=await fetch(url,{headers:{Accept:"application/json"}});
-  const j=await r.json();
-  const g=(j&&j[0])?{lat:parseFloat(j[0].lat), lng:parseFloat(j[0].lon)}:null;
-  if(g) geoCache.set(addr,g);
-  return g;
-}
-async function openMapPins(){
-  const notes=visibleNotes().filter(n=>extractAddress(n.text));
-  if(!notes.length){ toast("表示中のメモに『住所：…』が見つかりません"); return; }
-  const bg=el("div","modal-bg"); const box=el("div","mapmodal");
-  const bar=el("div","mapbar"); const st=el("span","mapstat"); st.textContent="地図を準備中…";
-  const cbtn=el("button","mini"); cbtn.textContent="閉じる"; cbtn.onclick=()=>bg.remove();
-  const sp=el("span"); sp.style.flex="1";
-  bar.appendChild(st); bar.appendChild(sp); bar.appendChild(cbtn);
-  const mapEl=el("div","mapcanvas");
-  box.appendChild(bar); box.appendChild(mapEl); bg.appendChild(box);
-  bg.onclick=e=>{ if(e.target===bg) bg.remove(); }; document.body.appendChild(bg);
-  try{ await loadLeaflet(); }catch(e){ st.textContent="地図の読み込みに失敗（ネット接続を確認してください）"; return; }
-  const map=L.map(mapEl).setView([35.68,139.76],11);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19, attribution:"© OpenStreetMap contributors"}).addTo(map);
-  setTimeout(()=>map.invalidateSize(),120);
-  const pts=[]; let done=0, fail=0;
-  for(const n of notes){
-    const addr=extractAddress(n.text);
-    let g=(n.geo && n.geo.addr===addr && typeof n.geo.lat==="number") ? {lat:n.geo.lat,lng:n.geo.lng} : null;
-    if(!g){
-      st.textContent=`座標を取得中… ${done+1}/${notes.length}`;
-      try{ g=await geocodeAddr(addr); }catch(e){}
-      if(g){ n.geo={addr, lat:g.lat, lng:g.lng}; markDirty(); }
-      await sleep(1100); // Nominatim利用ポリシー（約1件/秒）
-    }
-    if(g){
-      const title=(n.text.split("\n")[0]||"").trim();
-      const mk=L.marker([g.lat,g.lng]).addTo(map);
-      mk.bindPopup("<b>"+esc(title)+"</b><br><a href='https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(addr)+"' target='_blank' rel='noopener'>Googleマップで開く</a>");
-      pts.push([g.lat,g.lng]);
-    } else { fail++; }
-    done++;
-  }
-  if(pts.length){ map.fitBounds(pts,{padding:[30,30], maxZoom:16}); }
-  st.textContent = pts.length ? (`${pts.length}件をプロット`+(fail?`（${fail}件は住所を特定できず）`:"")) : "住所を地図上で特定できませんでした";
-}
-
 /* ---------- メモ帳（複数） ---------- */
 function renderBookSelector(){
   const sel=$("#bookSel"); if(!sel) return; sel.innerHTML="";
@@ -954,7 +920,6 @@ function bindEvents(){
     $("#sortBtn").textContent = "並び："+(state.sort==="updated"?"更新日順":"手動並び順"); renderGrid(); };
   $("#menuBtn").onclick=openMenu;
   $("#bookSel").onchange=()=>{ const v=$("#bookSel").value; if(v==="__new__"){ createBook(); } else if(v!==state.book){ switchBook(v); } };
-  $("#mapBtn").onclick=openMapPins;
   const cText=$("#cText");
   cText.addEventListener("input",()=>autoGrow(cText));
   cText.addEventListener("keydown",e=>{ if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){ addNoteFromCompose(); } });

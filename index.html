@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>メモ</title>
-<!-- メモ（Keep風）single-file app / version: v1.17 (2026-08-12) -->
-<meta name="app-version" content="v1.17 (2026-08-12)">
+<title>Notes</title>
+<!-- メモ（Keep風）single-file app / version: v1.19 (2026-08-12) -->
+<meta name="app-version" content="v1.19 (2026-08-12)">
 <style>
   :root{
     --bg:#fafafa; --ink:#222; --sub:#666; --line:#dcdcdc; --line2:#c8c8c8;
@@ -41,6 +41,7 @@
   .tck{ margin:0; cursor:pointer; }
   .tlbl{ cursor:pointer; }
   .taghead{ display:flex; align-items:center; gap:4px; padding:0 8px 4px; font-size:10px; color:#999; }
+  .colorfilter{ display:flex; flex-wrap:wrap; gap:7px; padding:4px 10px 6px; }
   .navitem .cnt{ margin-left:auto; font-size:11px; color:#999; }
   .navgroup{ font-size:11.5px; color:#555; cursor:pointer; padding:5px 8px; margin-top:3px; font-weight:600; user-select:none; }
   .navgroup:hover{ background:#eee; border-radius:6px; }
@@ -131,7 +132,7 @@
 <body>
 
 <header>
-  <span class="title">メモ</span>
+  <span class="title">Notes</span>
   <span class="ver" id="ver"></span>
   <select id="bookSel" class="hbtn" style="max-width:160px" title="メモ帳の切替"></select>
   <input id="search" placeholder="検索（キーワード・アーカイブも対象）">
@@ -160,7 +161,7 @@
 </div>
 
 <div id="overlay">
-  <h1>メモ</h1>
+  <h1>Notes</h1>
   <p>Googleドライブに保存します。続けるにはGoogleに接続してください。</p>
   <button id="connect">Googleに接続</button>
   <p id="ovmsg" style="font-size:11px;color:#999"></p>
@@ -175,7 +176,7 @@
 /* ============================================================
    メモ（Keep風）— 単一HTML / Googleドライブ保存(drive.file)
    ============================================================ */
-const APP_VERSION = "v1.17 (2026-08-12)";
+const APP_VERSION = "v1.19 (2026-08-12)";
 const CONFIG = {
   CLIENT_ID: "162155904085-ud13pisfjodgim2t19q9n2us70ekc9n4.apps.googleusercontent.com",
   SCOPE: "https://www.googleapis.com/auth/drive.file",
@@ -207,6 +208,7 @@ let state = {
   view: "ALL",         // ALL | ARCHIVE
   orTags: new Set(),   // 「いずれか(OR)」列で選択中のタグ
   andTags: new Set(),  // 「必須(AND)」列で選択中のタグ
+  colors: new Set(),   // 色で絞り込み（複数選択でOR）
   q: "",
   sort: "updated",     // updated | manual
   composeColor: "none",
@@ -455,8 +457,8 @@ function renderSide(){
   const g1=el("div","grp"); g1.textContent="表示"; side.appendChild(g1);
   const activeCount = state.notes.filter(n=>!n.archived).length;
   const arcCount = state.notes.filter(n=>n.archived).length;
-  side.appendChild(mkNav("🗒️ すべて",{active:state.view==="ALL"&&!anyTagSel(), count:activeCount,
-    onClick:()=>{ state.view="ALL"; clearTagSel(); renderAll(); }}));
+  side.appendChild(mkNav("🗒️ すべて",{active:state.view==="ALL"&&!anyTagSel()&&state.colors.size===0, count:activeCount,
+    onClick:()=>{ state.view="ALL"; clearTagSel(); state.colors.clear(); renderAll(); }}));
   const g2=el("div","grp"); g2.textContent="タグ（或＝いずれか / 必＝必須）"; side.appendChild(g2);
   const th=el("div","taghead"); th.innerHTML="<span class='cbcell h'>或</span><span class='cbcell h'>必</span><span>タグ／件数</span>"; side.appendChild(th);
   const counts=new Map(allTags());
@@ -479,6 +481,13 @@ function renderSide(){
     }
   }
   if(anyTagSel()){ side.appendChild(mkNav("✕ タグ選択をクリア",{onClick:()=>{ clearTagSel(); renderAll(); }})); }
+  const g4=el("div","grp"); g4.textContent="色で絞り込み（複数OR）"; side.appendChild(g4);
+  const drow=el("div","colorfilter");
+  PALETTE.forEach(pc=>{ const d=el("span","dot"+(state.colors.has(pc.key)?" sel":"")); d.style.background=pc.hex; d.title=pc.name;
+    d.onclick=()=>{ if(state.colors.has(pc.key)) state.colors.delete(pc.key); else state.colors.add(pc.key); renderAll(); };
+    drow.appendChild(d); });
+  side.appendChild(drow);
+  if(state.colors.size){ side.appendChild(mkNav("✕ 色選択をクリア",{onClick:()=>{ state.colors.clear(); renderAll(); }})); }
   const g3=el("div","grp"); g3.textContent=""; side.appendChild(g3);
   side.appendChild(mkNav("🗄️ アーカイブ",{active:state.view==="ARCHIVE", count:arcCount,
     onClick:()=>{ state.view="ARCHIVE"; clearTagSel(); renderAll(); }}));
@@ -493,14 +502,15 @@ function visibleNotes(){
     if(andT.length) l=l.filter(n=> andT.every(t=>n.tags.includes(t)));
     return l;
   };
+  const applyColor=(l)=> state.colors.size ? l.filter(n=> state.colors.has(n.color)) : l;
   let list=state.notes.slice();
   if(q){
     // 検索時はアーカイブも対象
     list=list.filter(n=> n.text.toLowerCase().includes(q) || n.tags.some(t=>t.toLowerCase().includes(q)) );
-    list=applyTags(list);
+    list=applyColor(applyTags(list));
   }else{
-    if(state.view==="ARCHIVE") list=list.filter(n=>n.archived);
-    else if(anyTagSel()) list=applyTags(list); // タグ絞り込みはアーカイブも含む
+    if(state.view==="ARCHIVE") list=applyColor(list.filter(n=>n.archived));
+    else if(anyTagSel()||state.colors.size) list=applyColor(applyTags(list)); // 絞り込み時はアーカイブも含む
     else list=list.filter(n=>!n.archived);
   }
   if(state.sort==="updated") list.sort((a,b)=> (b.updatedAt||"").localeCompare(a.updatedAt||""));

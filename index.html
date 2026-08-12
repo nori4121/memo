@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>メモ</title>
-<!-- メモ（Keep風）single-file app / version: v1.5 (2026-08-12) -->
-<meta name="app-version" content="v1.5 (2026-08-12)">
+<!-- メモ（Keep風）single-file app / version: v1.7 (2026-08-12) -->
+<meta name="app-version" content="v1.7 (2026-08-12)">
 <style>
   :root{
     --bg:#fafafa; --ink:#222; --sub:#666; --line:#dcdcdc; --line2:#c8c8c8;
@@ -74,6 +74,7 @@
   .linkchip{ display:inline-flex; align-items:center; gap:5px; text-decoration:none; color:#456; border:1px solid var(--line2); border-radius:8px; padding:3px 8px; font-size:11.5px; background:#fafafa; max-width:100%; }
   .favicon{ width:14px; height:14px; flex:none; }
   .linkchip span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mapchip{ background:#eef3f7; border-color:#9db8cf; color:#2b4a63; }
   .att-img{ width:64px; height:64px; object-fit:cover; border-radius:6px; border:1px solid var(--line2); cursor:pointer; }
   .att-file{ display:inline-flex; align-items:center; gap:4px; border:1px solid var(--line2); border-radius:6px; padding:2px 7px; font-size:11px; color:#445; cursor:pointer; background:#fafafa; max-width:100%; }
   .att-file .rm,.att-img-wrap .rm{ cursor:pointer; color:#a55; font-weight:700; }
@@ -156,7 +157,7 @@
 /* ============================================================
    メモ（Keep風）— 単一HTML / Googleドライブ保存(drive.file)
    ============================================================ */
-const APP_VERSION = "v1.5 (2026-08-12)";
+const APP_VERSION = "v1.7 (2026-08-12)";
 const CONFIG = {
   CLIENT_ID: "162155904085-ud13pisfjodgim2t19q9n2us70ekc9n4.apps.googleusercontent.com",
   SCOPE: "https://www.googleapis.com/auth/drive.file",
@@ -471,6 +472,19 @@ function parseYouTube(url){
   const m=url.match(/(?:youtube\.com\/(?:watch\?[^ ]*v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/);
   return m?m[1]:null;
 }
+function extractAddress(text){
+  // 「住所：〜」の行を拾う（全角/半角コロン対応）
+  const m=text.match(/住所\s*[：:]\s*([^\n]+)/);
+  return m?m[1].trim():null;
+}
+function siteName(host){
+  host=host.replace(/^www\./,"");
+  const map={ "tabelog.com":"食べログ","gnavi.co.jp":"ぐるなび","hotpepper.jp":"ホットペッパー",
+    "x.com":"X","twitter.com":"X","instagram.com":"Instagram","facebook.com":"Facebook",
+    "amazon.co.jp":"Amazon","amazon.com":"Amazon","note.com":"note","github.com":"GitHub",
+    "maps.google.com":"Googleマップ","google.com":"Google","goo.gl":"Google" };
+  return map[host]||host;
+}
 function renderLinks(n, box){
   box.innerHTML="";
   const urls=[...new Set((n.text.match(/https?:\/\/[^\s<>"'）】」]+/g)||[]))];
@@ -480,7 +494,7 @@ function renderLinks(n, box){
       const card=el("a","linkcard"); card.href=url; card.target="_blank"; card.rel="noopener";
       const img=el("img","linkthumb"); img.src="https://img.youtube.com/vi/"+yt+"/hqdefault.jpg"; img.alt="YouTube";
       const meta=el("div","linkmeta"); const t=el("div","linktitle"); t.textContent=url;
-      const s=el("div","linksite"); s.textContent="YouTube";
+      const s=el("div","linksite"); s.textContent="▶ YouTubeで開く";
       meta.appendChild(t); meta.appendChild(s); card.appendChild(img); card.appendChild(meta); box.appendChild(card);
       // タイトルはoEmbedからベストエフォートで取得（取れなくてもサムネは出る）
       fetch("https://www.youtube.com/oembed?url="+encodeURIComponent(url)+"&format=json")
@@ -489,9 +503,17 @@ function renderLinks(n, box){
       const chip=el("a","linkchip"); chip.href=url; chip.target="_blank"; chip.rel="noopener";
       let host=url; try{ host=new URL(url).hostname; }catch(e){}
       const fav=el("img","favicon"); fav.src="https://"+host+"/favicon.ico"; fav.onerror=()=>{ fav.style.display="none"; };
-      const sp=el("span"); sp.textContent=host;
+      const sp=el("span"); sp.textContent="🔗 "+siteName(host)+"で開く";
       chip.appendChild(fav); chip.appendChild(sp); box.appendChild(chip);
     }
+  }
+  // 住所があれば「地図で開く」チップ
+  const addr=extractAddress(n.text);
+  if(addr){
+    const chip=el("a","linkchip mapchip"); chip.target="_blank"; chip.rel="noopener"; chip.title=addr;
+    chip.href="https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(addr);
+    const sp=el("span"); sp.textContent="🗺 地図で開く： "+addr;
+    chip.appendChild(sp); box.appendChild(chip);
   }
 }
 async function removeAttachment(n,a,box){

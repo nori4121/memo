@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Notes</title>
-<!-- メモ（Keep風）single-file app / version: v1.19 (2026-08-12) -->
-<meta name="app-version" content="v1.19 (2026-08-12)">
+<!-- メモ（Keep風）single-file app / version: v1.20 (2026-08-12) -->
+<meta name="app-version" content="v1.20 (2026-08-12)">
 <style>
   :root{
     --bg:#fafafa; --ink:#222; --sub:#666; --line:#dcdcdc; --line2:#c8c8c8;
@@ -13,7 +13,7 @@
   }
   *{ box-sizing:border-box; }
   html,body{ margin:0; height:100%; }
-  body{ font-family:"BIZ UDPGothic","Yu Gothic UI","Noto Sans CJK JP",sans-serif; color:var(--ink); background:var(--bg); }
+  body{ font-family:"BIZ UDPGothic","Yu Gothic UI","Noto Sans CJK JP",sans-serif; color:var(--ink); background:var(--bg); overflow-x:hidden; }
   button{ font-family:inherit; }
 
   /* ---- header ---- */
@@ -52,7 +52,7 @@
   .compose textarea{ width:100%; border:0; resize:none; font:inherit; font-size:14px; outline:none; min-height:24px; background:transparent; }
   .compose.dropover{ outline:2px dashed var(--accent); outline-offset:2px; }
   .card.fileover{ outline:2px dashed var(--accent); }
-  .compose .row{ display:flex; align-items:center; gap:8px; margin-top:6px; }
+  .compose .row{ display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:6px; }
   .taginput{ border:1px dashed var(--line2); border-radius:6px; padding:3px 8px; font:inherit; font-size:12px; width:130px; }
   .mini{ border:1px solid var(--line2); background:#fff; border-radius:6px; padding:4px 9px; font-size:12px; cursor:pointer; }
   .mini:hover{ background:#f2f2f2; }
@@ -121,11 +121,21 @@
   .toast{ position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#333; color:#fff; padding:8px 16px; border-radius:8px; font-size:12.5px; z-index:200; opacity:0; transition:opacity .2s; }
   .toast.show{ opacity:.95; }
 
+  #drawerBtn{ display:none; }
+  #drawerBackdrop{ display:none; }
   @media(max-width:640px){
-    aside{ position:static; width:100%; height:auto; display:flex; flex-wrap:wrap; gap:4px; border-right:0; border-bottom:1px solid var(--line); }
-    aside .grp{ width:100%; }
+    header{ flex-wrap:wrap; padding:8px 10px; gap:6px; }
+    header .ver, header #acct, header .spacer{ display:none; }
+    #search{ order:5; flex:1 1 100%; max-width:none; }
+    #drawerBtn{ display:inline-block; }
     .main{ flex-direction:column; }
-    #grid{ grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); }
+    aside{ position:fixed; top:0; left:0; height:100%; width:82%; max-width:320px; transform:translateX(-100%); transition:transform .22s ease; z-index:60; border-right:1px solid var(--line); box-shadow:2px 0 14px rgba(0,0,0,.18); }
+    body.drawer-open aside{ transform:translateX(0); }
+    #drawerBackdrop{ position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:55; }
+    body.drawer-open #drawerBackdrop{ display:block; }
+    .content{ padding:12px; }
+    .compose{ max-width:none; }
+    #grid{ grid-template-columns:1fr; max-width:none; }
   }
 </style>
 </head>
@@ -133,6 +143,7 @@
 
 <header>
   <span class="title">Notes</span>
+  <button class="hbtn" id="drawerBtn" title="絞り込み（タグ・色）">☰ 絞り込み</button>
   <span class="ver" id="ver"></span>
   <select id="bookSel" class="hbtn" style="max-width:160px" title="メモ帳の切替"></select>
   <input id="search" placeholder="検索（キーワード・アーカイブも対象）">
@@ -142,6 +153,7 @@
   <button class="hbtn" id="menuBtn">メニュー ▾</button>
 </header>
 
+<div id="drawerBackdrop"></div>
 <div class="main">
   <aside id="side"></aside>
   <div class="content">
@@ -176,7 +188,7 @@
 /* ============================================================
    メモ（Keep風）— 単一HTML / Googleドライブ保存(drive.file)
    ============================================================ */
-const APP_VERSION = "v1.19 (2026-08-12)";
+const APP_VERSION = "v1.20 (2026-08-12)";
 const CONFIG = {
   CLIENT_ID: "162155904085-ud13pisfjodgim2t19q9n2us70ekc9n4.apps.googleusercontent.com",
   SCOPE: "https://www.googleapis.com/auth/drive.file",
@@ -458,7 +470,7 @@ function renderSide(){
   const activeCount = state.notes.filter(n=>!n.archived).length;
   const arcCount = state.notes.filter(n=>n.archived).length;
   side.appendChild(mkNav("🗒️ すべて",{active:state.view==="ALL"&&!anyTagSel()&&state.colors.size===0, count:activeCount,
-    onClick:()=>{ state.view="ALL"; clearTagSel(); state.colors.clear(); renderAll(); }}));
+    onClick:()=>{ state.view="ALL"; clearTagSel(); state.colors.clear(); renderAll(); closeDrawer(); }}));
   const g2=el("div","grp"); g2.textContent="タグ（或＝いずれか / 必＝必須）"; side.appendChild(g2);
   const th=el("div","taghead"); th.innerHTML="<span class='cbcell h'>或</span><span class='cbcell h'>必</span><span>タグ／件数</span>"; side.appendChild(th);
   const counts=new Map(allTags());
@@ -490,7 +502,7 @@ function renderSide(){
   if(state.colors.size){ side.appendChild(mkNav("✕ 色選択をクリア",{onClick:()=>{ state.colors.clear(); renderAll(); }})); }
   const g3=el("div","grp"); g3.textContent=""; side.appendChild(g3);
   side.appendChild(mkNav("🗄️ アーカイブ",{active:state.view==="ARCHIVE", count:arcCount,
-    onClick:()=>{ state.view="ARCHIVE"; clearTagSel(); renderAll(); }}));
+    onClick:()=>{ state.view="ARCHIVE"; clearTagSel(); renderAll(); closeDrawer(); }}));
   side.appendChild(mkNav("⚙️ タグ管理",{onClick:openTagManager}));
 }
 
@@ -734,6 +746,7 @@ function addNoteFromCompose(){
    tag manager
    ============================================================ */
 function openTagManager(){
+  closeDrawer();
   const bg=el("div","modal-bg"); const m=el("div","modal");
   const reopen=()=>{ bg.remove(); openTagManager(); };
   const btn=(label,fn,dis)=>{ const b=el("button","mini"); b.textContent=label; if(dis){ b.disabled=true; } else b.onclick=fn; return b; };
@@ -917,6 +930,7 @@ function setupComposeAttach(){
    ============================================================ */
 function refreshTagOptions(){ const dl=$("#tagOptions"); if(!dl)return; dl.innerHTML=""; allTags().forEach(([t])=>{ const o=el("option"); o.value=t; dl.appendChild(o); }); }
 function renderAll(){ renderSide(); renderGrid(); refreshTagOptions(); }
+function closeDrawer(){ document.body.classList.remove("drawer-open"); }
 
 /* ---------- メモ帳（複数） ---------- */
 function renderBookSelector(){
@@ -954,6 +968,8 @@ function bindEvents(){
     $("#sortBtn").textContent = "並び："+(state.sort==="updated"?"更新日順":"手動並び順"); renderGrid(); };
   $("#menuBtn").onclick=openMenu;
   $("#bookSel").onchange=()=>{ const v=$("#bookSel").value; if(v==="__new__"){ createBook(); } else if(v!==state.book){ switchBook(v); } };
+  $("#drawerBtn").onclick=()=>document.body.classList.toggle("drawer-open");
+  $("#drawerBackdrop").onclick=closeDrawer;
   const cText=$("#cText");
   cText.addEventListener("input",()=>autoGrow(cText));
   cText.addEventListener("keydown",e=>{ if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){ addNoteFromCompose(); } });
